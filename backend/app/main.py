@@ -10,6 +10,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.agent.nodes.eligibility import EligibilityNode
+from app.agent.nodes.plan import PlanNode
+from app.agent.nodes.policy_compare import PolicyCompareNode
+from app.agent.nodes.policy_search import PolicySearchNode
+from app.agent.nodes.profile import ProfileNode
+from app.agent.tools.mock import MockEligibilityTool, MockPlanTool, MockPolicyCompareTool, MockPolicySearchTool
+from app.agent.workflow import WorkflowAgent
 from app.api.chat import router as chat_router
 from app.core.config import Settings
 from app.core.errors import AppError
@@ -45,13 +52,25 @@ def create_app(
         history_limit=active_settings.session_history_limit,
         session_limit=active_settings.session_limit,
     )
+    policy_search_tool = MockPolicySearchTool()
+    eligibility_tool = MockEligibilityTool()
+    policy_compare_tool = MockPolicyCompareTool()
+    plan_tool = MockPlanTool()
+    workflow_agent = WorkflowAgent(
+        profile_node=ProfileNode(),
+        policy_search_node=PolicySearchNode(policy_search_tool),
+        eligibility_node=EligibilityNode(eligibility_tool),
+        policy_compare_node=PolicyCompareNode(policy_compare_tool),
+        plan_node=PlanNode(plan_tool),
+    )
     application = FastAPI(
         title="应届毕业生就业创业政策 Agent - Chat 模块",
         version="1.0.0",
     )
     application.state.settings = active_settings
     application.state.llm_provider = active_provider
-    application.state.chat_service = ChatService(active_provider, store)
+    application.state.workflow_agent = workflow_agent
+    application.state.chat_service = ChatService(active_provider, store, workflow_agent)
 
     application.add_middleware(
         CORSMiddleware,
