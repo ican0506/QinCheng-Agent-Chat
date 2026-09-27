@@ -1,6 +1,6 @@
 # 应届毕业生就业政策 Agent 工作台
 
-本目录包含第一阶段真实 Chat 链路，以及面向后续 Agent 的三栏工作台前端。LLM 回答通过流式接口渐进显示，同时保留原 JSON Chat 接口；右侧 Workspace 使用明确标记的 Mock 数据演示 Agent 与用户如何联动，不包含真实政策判断、RAG、OCR 或文件上传。
+本目录包含真实 Chat 链路和 Python 版 Workflow Agent Demo。LLM 回答通过流式接口渐进显示，同时保留原 JSON Chat 接口；后端使用明确标记为 Demo 的 Mock 政策完成固定顺序的画像检查、政策检索、资格判断、政策比较与办理计划生成，不包含真实政策、RAG、OCR 或文件上传。
 
 ## 目录
 

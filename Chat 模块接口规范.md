@@ -4,7 +4,7 @@
 
 Chat 模块负责完成第一阶段的真实对话链路：前端收集用户消息，调用 Chat API；后端保存当前进程内的会话上下文并调用 LLM；模型回答通过同一个接口返回前端。
 
-当前模块只提供通用对话。它不检索政策、不判断资格、不调用业务工具，也不审核材料。响应中已经保留这些后续模块需要的字段，但第一阶段返回空值。
+当前模块在 ChatService 内接入固定顺序的 Python Workflow Agent Demo。它使用明确标记为 Demo 的 Mock 政策与规则生成结构化结果；不接入真实政策、RAG、数据库、OCR 或材料审核。
 
 ## 2. 整体调用流程
 
@@ -13,6 +13,7 @@ Chat 模块负责完成第一阶段的真实对话链路：前端收集用户消
   -> Vue 对话界面
   -> POST /api/agent/chat/stream（前端默认）
   -> ChatService
+  -> WorkflowAgent（Profile → PolicySearch → Eligibility → PolicyCompare → Plan）
   -> LLMProvider
   -> OpenAI 兼容的 LLM API
   -> SSE 增量事件
@@ -120,12 +121,12 @@ data: {"code":0,"message":"success","traceId":"demo-001","data":{"sessionId":"se
 | --- | --- | --- |
 | `sessionId` | string | 原样返回本次会话标识 |
 | `replyText` | string | LLM 生成的 Markdown 文本 |
-| `needFollowUp` | boolean | 当前固定为 `false` |
-| `followUpQuestions` | array | 当前固定为空数组 |
+| `needFollowUp` | boolean | 画像不完整时为 `true`，属于正常成功流程 |
+| `followUpQuestions` | array | 画像不完整时返回需要补充的具体问题 |
 | `userProfile` | object | 本次请求中的用户档案 |
-| `policies` | array | 为 RAG 保留，当前为空数组 |
-| `eligibility` | array | 为规则判断保留，当前为空数组 |
-| `plan` | object/null | 为 Workflow Agent 保留，当前为 `null` |
+| `policies` | array | 当前为明确标记为 Demo 的 Mock 政策结果 |
+| `eligibility` | array | 当前为 Mock 规则生成的 PASS、UNKNOWN、FAIL 资格结果 |
+| `plan` | object/null | 当前为 Mock Tool 生成的 Demo 办理计划；画像不完整时为 `null` |
 | `materialResults` | array | 为材料审核保留，当前为空数组 |
 
 ## 6. 多轮对话如何传递
@@ -139,7 +140,6 @@ data: {"code":0,"message":"success","traceId":"demo-001","data":{"sessionId":"se
 | HTTP 状态 | code | 含义 |
 | --- | --- | --- |
 | 400 | `1001` | 请求字段缺失、格式错误，或 `sessionId` 与 `userId` 不匹配 |
-| 200 | `1002` | 信息不足，预留给后续 Agent |
 | 200 | `2001` | 未找到匹配政策，预留给后续 RAG |
 | 404 | `2002` | 政策不存在，预留给后续 RAG |
 | 200 | `3001` | 材料解析失败，预留给后续 Tool |

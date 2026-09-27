@@ -1,0 +1,100 @@
+from __future__ import annotations
+
+from enum import Enum
+
+from pydantic import BaseModel, Field
+
+from app.models.chat import UserProfile
+
+
+class AgentStage(str, Enum):
+    PROFILE_COLLECTING = "PROFILE_COLLECTING"
+    POLICY_SEARCHING = "POLICY_SEARCHING"
+    ELIGIBILITY_CHECKING = "ELIGIBILITY_CHECKING"
+    POLICY_COMPARING = "POLICY_COMPARING"
+    PLANNING = "PLANNING"
+    COMPLETED = "COMPLETED"
+
+
+class EligibilityStatus(str, Enum):
+    PASS = "PASS"
+    FAIL = "FAIL"
+    UNKNOWN = "UNKNOWN"
+    MANUAL_REVIEW = "MANUAL_REVIEW"
+
+
+class PolicyRelationType(str, Enum):
+    PREREQUISITE = "PREREQUISITE"
+    PARALLEL = "PARALLEL"
+    MUTEX = "MUTEX"
+    TIME_DEPENDENT = "TIME_DEPENDENT"
+
+
+class PolicyCandidate(BaseModel):
+    policyId: str
+    name: str
+    region: str
+    department: str
+    summary: str
+    effectiveDate: str
+    expiryDate: str | None = None
+    sourceUrl: str
+    matchReason: str
+    conditions: list[str] = Field(default_factory=list)
+    requiredMaterials: list[str] = Field(default_factory=list)
+    process: list[str] = Field(default_factory=list)
+    isMock: bool = True
+
+
+class ConditionResult(BaseModel):
+    conditionId: str
+    description: str
+    status: EligibilityStatus
+    reason: str
+    userEvidence: str | None = None
+    policyEvidence: str | None = None
+
+
+class EligibilityResult(BaseModel):
+    policyId: str
+    overallStatus: EligibilityStatus
+    conditionResults: list[ConditionResult] = Field(default_factory=list)
+    missingFields: list[str] = Field(default_factory=list)
+    summary: str
+
+
+class PolicyRelation(BaseModel):
+    fromPolicyId: str
+    toPolicyId: str
+    relationType: PolicyRelationType
+    reason: str
+
+
+class PlanStep(BaseModel):
+    stepId: str
+    title: str
+    description: str
+    policyIds: list[str] = Field(default_factory=list)
+    requiredMaterials: list[str] = Field(default_factory=list)
+
+
+class OverallPlan(BaseModel):
+    summary: str
+    steps: list[PlanStep] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    isMock: bool = True
+
+
+class GovernmentAgentState(BaseModel):
+    sessionId: str
+    userMessage: str
+    userProfile: UserProfile
+    stage: AgentStage = AgentStage.PROFILE_COLLECTING
+    candidatePolicies: list[PolicyCandidate] = Field(default_factory=list)
+    eligibilityResults: list[EligibilityResult] = Field(default_factory=list)
+    policyRelations: list[PolicyRelation] = Field(default_factory=list)
+    overallPlan: OverallPlan | None = None
+    needFollowUp: bool = False
+    followUpQuestions: list[str] = Field(default_factory=list)
+    nextAction: str | None = None
+    errors: list[str] = Field(default_factory=list)
