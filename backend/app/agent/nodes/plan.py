@@ -9,7 +9,13 @@ class PlanNode:
         self._tool = tool
 
     async def execute(self, state: GovernmentAgentState) -> GovernmentAgentState:
-        state.overallPlan = await self._tool.build_plan(state.candidatePolicies, state.eligibilityResults, state.policyRelations)
+        state.overallPlan = await self._tool.build_plan(
+            state.userProfile, state.candidatePolicies, state.eligibilityResults, state.policyRelations
+        )
         state.stage = AgentStage.COMPLETED
-        state.nextAction = "查看 Demo 办理计划，并以当地官方政策为准。"
+        state.nextAction = (
+            "请先补充关键画像信息后重新核验资格。"
+            if state.needFollowUp
+            else "查看基于当前政策资格、时效和申报窗口生成的办理路径。"
+        )
         return state

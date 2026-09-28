@@ -67,5 +67,5 @@ class MockPolicyCompareTool:
 
 
 class MockPlanTool:
-    async def build_plan(self, policies: list[PolicyCandidate], eligibility: list[EligibilityResult], relations: list[PolicyRelation]) -> OverallPlan:
+    async def build_plan(self, profile: UserProfile, policies: list[PolicyCandidate], eligibility: list[EligibilityResult], relations: list[PolicyRelation]) -> OverallPlan:
         return OverallPlan(summary="这是基于 Mock 政策和固定规则生成的演示办理计划，不代表真实政策结论。", steps=[PlanStep(stepId="prepare-startup", title="优先准备创业补贴申请", description="Demo 判断为 PASS，可先整理创业补贴的申请材料。", policyIds=["DEMO-STARTUP-001"], requiredMaterials=["身份证明", "毕业证明", "创业主体信息"]), PlanStep(stepId="confirm-venue", title="补充创业场地信息", description="场地补贴为 UNKNOWN，需要补充租赁或场地证明。", policyIds=["DEMO-RENT-002"], requiredMaterials=["场地租赁证明"]), PlanStep(stepId="review-social", title="暂不申请社保补贴", description="社保补贴 Demo 判断为 FAIL，满足缴费时长后再核验。", policyIds=["DEMO-SOCIAL-003"], requiredMaterials=["社保缴费记录"])], notes=["所有政策均为 Demo 数据，请以当地官方发布为准。"])

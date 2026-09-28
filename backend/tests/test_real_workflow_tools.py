@@ -74,6 +74,8 @@ def test_chat_api_uses_real_policy_repository_and_rule_eligibility() -> None:
     assert data["policies"]
     assert all(not item["policyId"].startswith("DEMO-") and item["isMock"] is False for item in data["policies"])
     assert any(item["policyId"] == "suzhou-startup-social-2021" and item["overallStatus"] == "PASS" for item in data["eligibility"])
+    assert data["plan"]["isMock"] is False
+    assert all(not policy_id.startswith("DEMO-") for step in data["plan"]["steps"] for policy_id in step["policyIds"])
 
 
 def test_real_unknown_fields_become_bounded_follow_up_questions() -> None:

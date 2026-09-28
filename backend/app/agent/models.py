@@ -30,6 +30,23 @@ class PolicyRelationType(str, Enum):
     TIME_DEPENDENT = "TIME_DEPENDENT"
 
 
+class PlanActionType(str, Enum):
+    PROVIDE_INFO = "PROVIDE_INFO"
+    VERIFY_ELIGIBILITY = "VERIFY_ELIGIBILITY"
+    PREPARE_MATERIALS = "PREPARE_MATERIALS"
+    MANUAL_REVIEW = "MANUAL_REVIEW"
+    APPLY_POLICY = "APPLY_POLICY"
+    WAIT_FOR_WINDOW = "WAIT_FOR_WINDOW"
+    NOTICE = "NOTICE"
+
+
+class PlanStepStatus(str, Enum):
+    PENDING = "PENDING"
+    BLOCKED = "BLOCKED"
+    READY = "READY"
+    INFO = "INFO"
+
+
 class PolicyCandidate(BaseModel):
     policyId: str
     name: str
@@ -68,6 +85,7 @@ class PolicyRelation(BaseModel):
     toPolicyId: str
     relationType: PolicyRelationType
     reason: str
+    policyEvidence: str | None = None
 
 
 class PlanStep(BaseModel):
@@ -76,6 +94,9 @@ class PlanStep(BaseModel):
     description: str
     policyIds: list[str] = Field(default_factory=list)
     requiredMaterials: list[str] = Field(default_factory=list)
+    actionType: PlanActionType = PlanActionType.NOTICE
+    priority: int = 70
+    status: PlanStepStatus = PlanStepStatus.INFO
 
 
 class OverallPlan(BaseModel):
