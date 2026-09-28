@@ -13,11 +13,14 @@ from fastapi.staticfiles import StaticFiles
 from app.agent.workflow import WorkflowAgent
 from app.agent.tools.local_policy import LocalPolicySearchTool
 from app.agent.tools.rag_policy import RagPolicySearchTool
+from app.agent.tools.plan import DeterministicPlanTool
+from app.agent.tools.policy_compare import DeterministicPolicyCompareTool
 from app.api.chat import router as chat_router
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.models.chat import ApiResponse
 from app.policy.repository import PolicyRepository
+from app.policy.relations import PolicyRelationRepository
 from app.rag.chunker import MarkdownPolicyChunker
 from app.rag.loader import RagDocumentLoader
 from app.rag.retriever import InMemoryRagRetriever
@@ -68,7 +71,15 @@ def create_app(
     policy_search_tool = RagPolicySearchTool(
         rag_retriever, policy_repository, local_policy_search
     )
-    workflow_agent = WorkflowAgent.production(policy_repository, policy_search_tool)
+    policy_relation_repository = PolicyRelationRepository(
+        backend_root / "data" / "policies" / "policy_relations.json"
+    )
+    workflow_agent = WorkflowAgent.production(
+        policy_repository,
+        policy_search_tool,
+        DeterministicPolicyCompareTool(policy_repository, policy_relation_repository),
+        DeterministicPlanTool(policy_repository),
+    )
     application = FastAPI(
         title="应届毕业生就业创业政策 Agent - Chat 模块",
         version="1.0.0",
@@ -76,6 +87,7 @@ def create_app(
     application.state.settings = active_settings
     application.state.llm_provider = active_provider
     application.state.policy_repository = policy_repository
+    application.state.policy_relation_repository = policy_relation_repository
     application.state.rag_retriever = rag_retriever
     application.state.workflow_agent = workflow_agent
     application.state.chat_service = ChatService(active_provider, store, workflow_agent)

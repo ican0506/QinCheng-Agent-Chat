@@ -1,62 +1,185 @@
-# 应届毕业生就业政策 Agent 工作台
+# 高校毕业生就业创业政策智能 Agent
 
-本目录包含真实 Chat 链路和 Python 版 Workflow Agent Demo。LLM 回答通过流式接口渐进显示，同时保留原 JSON Chat 接口；后端使用明确标记为 Demo 的 Mock 政策完成固定顺序的画像检查、政策检索、资格判断、政策比较与办理计划生成，不包含真实政策、RAG、OCR 或文件上传。
+面向高校毕业生就业、创业场景的政策信息检索、资格辅助判断与办理路径规划项目。后端提供普通 Chat 与 SSE 流式接口；前端提供 Vue 3 对话界面。
 
-## 目录
+本项目不是政府部门审批系统。最终资格、申报材料、办理时间和审批结果以相关政府部门最新官方规定及实际审核为准。
 
-- `frontend/`：Vue 3 + TypeScript + Vite 对话界面
-- `backend/`：FastAPI Chat API、会话上下文和 LLM Provider
-- `docs/Frontend Architecture.md`：三栏页面、Workspace 和后续接入说明
-- `docs/Frontend API Contract.md`：前端接口与状态数据契约
-- `Chat 模块接口规范.md`：接口调用说明
-- `后续开发对接说明.md`：Agent、RAG、Tool 后续接入位置
+## 当前能力
+
+- 用户画像采集与多轮信息补全；
+- 苏州市高校毕业生就业创业政策检索；
+- 已核验官方政策原文知识库检索与来源追溯；
+- 确定性资格辅助判断：`PASS`、`FAIL`、`UNKNOWN`、`MANUAL_REVIEW`；
+- 确定性政策关系分析与办理路径规划；
+- OpenAI-compatible LLM 仅负责语言组织和解释；
+- `POST /api/agent/chat` 与 `POST /api/agent/chat/stream`。
+
+## 当前 Workflow
+
+```text
+User Message
+    ↓
+ProfileNode
+    ↓
+RagPolicySearchTool
+    ↓
+RuleEligibilityTool
+    ↓
+PolicyCompareTool
+    ↓
+PlanTool
+    ↓
+LLM Explanation
+    ↓
+Chat API / SSE
+```
+
+- `RagPolicySearchTool`：召回政策、检索原文片段并提供官方来源依据；知识库异常时回退到 `LocalPolicySearchTool`。
+- `RuleEligibilityTool`：唯一负责确定性资格判断，LLM 不决定资格结论。
+- `PolicyCompareTool`：只读取显式、可追溯的关系配置，不根据名称、主题或人群猜测政策间关系。
+- `PlanTool`：根据资格结果、政策时效、申报窗口、缺失信息、材料和显式关系生成结构化办理步骤。
+- LLM：只使用结构化 Agent 状态组织最终中文说明。
+
+## 政策数据范围
+
+当前仅覆盖苏州市高校毕业生就业创业场景的 5 条已核验政策记录，包括一次性创业补贴、创业社会保险补贴、灵活就业社会保险补贴、就业见习与求职创业补贴历史通知。
+
+来源为苏州市政府官网、苏州市人力资源和社会保障局等官方页面。数据保存在：
+
+```text
+backend/data/policies/policies.json
+backend/data/policies/raw/*.md
+backend/data/policies/policy_relations.json
+```
+
+`policy_relations.json` 当前为空数组：现有 5 条政策没有足够官方依据支持 `MUTEX` 或 `PREREQUISITE`，项目不会为了演示制造关系。
+
+## 本地政策原文检索
+
+知识库只使用已核验的本地 Markdown 政策原文，并能将每个命中片段追溯到政策 ID、官方 `sourceUrl`、时效状态和最后核验日期。
+
+检索过程：
+
+```text
+Markdown 二级标题优先切分
+    ↓
+Metadata Filter（地区 / 主题 / 目标人群 / 时效状态）
+    ↓
+中文字符 2/3-gram TF-IDF
+    ↓
+余弦相关性排序 + Top-K + 最低相关度阈值
+    ↓
+PolicyCandidate 去重
+```
+
+这是轻量本地文本相关性检索，不是 embedding、深度语义模型或外部向量数据库。
+
+## 资格辅助判断
+
+`RuleEligibilityTool` 是确定性规则引擎，支持：
+
+```text
+eq / gte / lte / in / not_in / exists / within_years
+```
+
+结果语义：
+
+- `PASS`：当前结构化信息明确满足；
+- `FAIL`：当前结构化信息明确不满足；
+- `UNKNOWN`：缺少必要信息，会转为有限的补充问题；
+- `MANUAL_REVIEW`：需要材料或经办机构人工确认。
+
+LLM 不参与最终资格判断，也不覆盖上述状态。
+
+## 政策关系与办理路径
+
+`PolicyCompareTool` 支持 `PREREQUISITE`、`PARALLEL`、`MUTEX`、`TIME_DEPENDENT`，但只输出显式配置且有政策依据的关系。
+
+`PlanTool` 使用以下结构化动作生成稳定步骤：
+
+```text
+PROVIDE_INFO
+VERIFY_ELIGIBILITY
+PREPARE_MATERIALS
+MANUAL_REVIEW
+APPLY_POLICY
+WAIT_FOR_WINDOW
+NOTICE
+```
+
+计划不会自动审批：`FAIL`、历史或失效政策不会进入申请主路径；窗口关闭的政策会生成等待窗口提示；相同缺失字段只会生成一条统一补充信息步骤。
+
+## 技术栈
+
+- Frontend：Vue 3、TypeScript、Vite
+- Backend：FastAPI、Pydantic、WorkflowAgent
+- Policy：PolicyRepository、PolicyRecord、PolicyCondition
+- Retrieval：RagPolicySearchTool、中文字符 n-gram TF-IDF、LocalPolicySearchTool fallback
+- Eligibility：RuleEligibilityTool
+- Planning：PolicyCompareTool、PlanTool
+- LLM：OpenAI-compatible provider
 
 ## 本地启动
 
-### 1. 配置后端
-
-```powershell
-cd backend
-Copy-Item .env.example .env
-```
-
-编辑 `.env`，至少填写：
-
-```dotenv
-LLM_API_KEY=你的模型服务密钥
-```
-
-默认使用移动云的 OpenAI 兼容接口和 `deepseek-v4-flash-0731` 模型。更换服务时修改 `LLM_BASE_URL` 和 `LLM_MODEL`，不需要改业务代码。
-
-### 2. 安装并构建前端
-
-```powershell
-cd frontend
-npm install
-npm run build
-```
-
-### 3. 启动完整应用
+### 后端
 
 ```powershell
 cd backend
 python -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements-dev.txt
-.\.venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-浏览器访问 `http://127.0.0.1:8000/`。开发前端时可以在 `frontend/` 运行 `npm run dev`，访问 `http://127.0.0.1:5173/`。
+Windows PowerShell：
 
-## 验证
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+Windows Git Bash：
+
+```bash
+source .venv/Scripts/activate
+```
+
+安装并启动：
+
+```powershell
+pip install -r requirements.txt
+python -m uvicorn app.main:app --reload
+```
+
+- 服务地址：`http://127.0.0.1:8000`
+- Swagger：`http://127.0.0.1:8000/docs`
+
+如需真实 LLM 调用，复制 `backend/.env.example` 为 `.env`，并按现有环境变量配置 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`。不要提交 `.env` 或真实 API Key。
+
+### 前端
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+开发地址默认为 `http://localhost:5173`。
+
+## 测试
 
 ```powershell
 cd backend
-.\.venv\Scripts\python -m pytest
-.\.venv\Scripts\python scripts\smoke_real_llm.py
+pytest
 
-cd ..\frontend
+cd ../frontend
 npm run typecheck
 npm run build
 ```
 
-`smoke_real_llm.py` 会通过已启动的 Chat API 发起一次真实模型请求，不读取或输出 API Key。
+## 当前限制
+
+- 当前政策库仅有 5 条真实苏州市政策，不覆盖全国或完整苏州市全部政策；
+- 当前主要覆盖高校毕业生就业创业场景；
+- 本地原文检索不是 embedding 模型；
+- 部分政策条件需要 `MANUAL_REVIEW`；
+- 部分政策的 `applicationStatus` 仍为 `UNKNOWN`；
+- 部分政策的官方材料和流程信息不完整；
+- 前端 Workspace 仍有部分 Mock 展示；
+- 尚未实现 OCR、文件上传、材料识别、Dify、外部向量数据库和业务数据库持久化。

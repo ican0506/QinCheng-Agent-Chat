@@ -25,6 +25,7 @@ class PolicyCompareTool(Protocol):
 class PlanTool(Protocol):
     async def build_plan(
         self,
+        profile: UserProfile,
         policies: list[PolicyCandidate],
         eligibility: list[EligibilityResult],
         relations: list[PolicyRelation],
