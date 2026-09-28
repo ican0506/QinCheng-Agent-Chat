@@ -119,3 +119,17 @@ def test_stream_done_keeps_real_chat_data_contract() -> None:
     assert set(data) == {"sessionId", "replyText", "needFollowUp", "followUpQuestions", "userProfile", "policies", "eligibility", "plan", "materialResults"}
     assert data["policies"]
     assert all(not policy["policyId"].startswith("DEMO-") for policy in data["policies"])
+
+
+def test_production_chat_uses_rag_evidence_for_real_policy_recall() -> None:
+    client = TestClient(create_app(settings(), RecordingProvider()))
+    response = client.post("/api/agent/chat", json=payload("苏州毕业生创业有什么补贴", {
+        "graduationDate": "2025-06-30",
+        "socialInsuranceMonths": 6,
+        "businessRegistrationMonths": 12,
+    }))
+
+    assert response.status_code == 200
+    policies = response.json()["data"]["policies"]
+    assert any(policy["policyId"] == "suzhou-startup-one-time-2023" for policy in policies)
+    assert all("RAG 命中" in policy["matchReason"] for policy in policies)

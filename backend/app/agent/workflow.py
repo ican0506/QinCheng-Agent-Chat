@@ -9,6 +9,7 @@ from app.agent.nodes.profile import ProfileNode
 from app.agent.tools.mock import MockEligibilityTool, MockPlanTool, MockPolicyCompareTool, MockPolicySearchTool
 from app.agent.tools.local_policy import LocalPolicySearchTool
 from app.agent.tools.rule_eligibility import RuleEligibilityTool
+from app.agent.tools.base import PolicySearchTool
 from app.models.chat import UserProfile
 from app.policy.repository import PolicyRepository
 
@@ -27,10 +28,12 @@ class WorkflowAgent:
         return cls(ProfileNode(), PolicySearchNode(search_tool), EligibilityNode(MockEligibilityTool()), PolicyCompareNode(MockPolicyCompareTool()), PlanNode(MockPlanTool()))
 
     @classmethod
-    def production(cls, repository: PolicyRepository) -> WorkflowAgent:
+    def production(
+        cls, repository: PolicyRepository, policy_search_tool: PolicySearchTool | None = None
+    ) -> WorkflowAgent:
         return cls(
             ProfileNode(),
-            PolicySearchNode(LocalPolicySearchTool(repository)),
+            PolicySearchNode(policy_search_tool or LocalPolicySearchTool(repository)),
             EligibilityNode(RuleEligibilityTool(repository)),
             PolicyCompareNode(MockPolicyCompareTool()),
             PlanNode(MockPlanTool()),
