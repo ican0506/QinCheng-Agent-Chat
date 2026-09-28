@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -18,10 +19,17 @@ class UserProfile(BaseModel):
     city: str | None = None
     education: Literal["本科", "硕士", "专科", "其他"] | None = None
     graduationYear: int | None = None
+    graduationDate: date | None = Field(default=None, exclude=True)
     employmentStatus: Literal["待就业", "已就业", "创业中"] | None = None
     isFirstTimeEntrepreneur: bool | None = None
     enterpriseRegisterDate: str | None = None
+    businessRegistrationMonths: int | None = Field(default=None, exclude=True)
     socialInsuranceMonths: int | None = None
+    residencyRegistration: str | None = Field(default=None, exclude=True)
+    unemploymentStatus: str | None = Field(default=None, exclude=True)
+    flexibleEmploymentInsurance: bool | None = Field(default=None, exclude=True)
+    jobSeekingIntent: bool | None = Field(default=None, exclude=True)
+    hardshipIdentity: str | None = Field(default=None, exclude=True)
     housingStatus: Literal["租房", "自有", "其他"] | None = None
     fields: list[ProfileField] = Field(default_factory=list)
 

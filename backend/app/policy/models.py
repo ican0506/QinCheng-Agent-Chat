@@ -31,6 +31,11 @@ class ApplicationStatus(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
+class EvaluationMode(str, Enum):
+    AUTO = "AUTO"
+    MANUAL = "MANUAL"
+
+
 class PolicyCondition(BaseModel):
     conditionId: str
     field: str
@@ -38,6 +43,7 @@ class PolicyCondition(BaseModel):
     value: Any
     description: str
     policyEvidence: str
+    evaluationMode: EvaluationMode = EvaluationMode.AUTO
 
 
 class PolicyRecord(BaseModel):
