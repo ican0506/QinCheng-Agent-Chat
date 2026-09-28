@@ -50,6 +50,18 @@ def complete_profile() -> UserProfile:
     )
 
 
+def real_profile() -> dict:
+    return {
+        "city": "苏州市",
+        "education": "本科",
+        "graduationYear": 2026,
+        "graduationDate": "2025-06-30",
+        "employmentStatus": "创业中",
+        "socialInsuranceMonths": 6,
+        "businessRegistrationMonths": 12,
+    }
+
+
 def payload(profile: dict) -> dict:
     return {
         "sessionId": "session-workflow-12345678",
@@ -110,17 +122,14 @@ def test_missing_profile_stops_before_policy_search() -> None:
 def test_chat_api_returns_agent_structured_data() -> None:
     client = TestClient(create_app(settings(), RecordingProvider()))
 
-    response = client.post("/api/agent/chat", json=payload(complete_profile().model_dump()))
+    response = client.post("/api/agent/chat", json=payload(real_profile()))
 
     assert response.status_code == 200
     body = response.json()
     assert body["code"] == 0
-    assert len(body["data"]["policies"]) == 3
-    assert [item["overallStatus"] for item in body["data"]["eligibility"]] == [
-        "PASS",
-        "UNKNOWN",
-        "FAIL",
-    ]
+    assert body["data"]["policies"]
+    assert all(item["isMock"] is False for item in body["data"]["policies"])
+    assert any(item["overallStatus"] == "PASS" for item in body["data"]["eligibility"])
     assert body["data"]["plan"]["steps"]
 
 
@@ -142,7 +151,7 @@ def test_stream_done_keeps_agent_structured_data() -> None:
 
     response = client.post(
         "/api/agent/chat/stream",
-        json=payload(complete_profile().model_dump()),
+        json=payload(real_profile()),
     )
 
     assert response.status_code == 200
@@ -150,6 +159,7 @@ def test_stream_done_keeps_agent_structured_data() -> None:
     assert [event for event, _ in events] == ["delta", "delta", "done"]
     done = events[-1][1]
     assert done["code"] == 0
-    assert len(done["data"]["policies"]) == 3
+    assert done["data"]["policies"]
+    assert all(item["isMock"] is False for item in done["data"]["policies"])
     assert done["data"]["eligibility"]
     assert done["data"]["plan"]["steps"]

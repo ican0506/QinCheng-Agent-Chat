@@ -13,12 +13,18 @@ class LocalPolicySearchTool:
 
     @staticmethod
     def _topic(message: str) -> str | None:
+        if "求职创业补贴" in message:
+            return "求职创业补贴"
+        if "就业见习" in message:
+            return "就业见习"
+        if "灵活就业" in message:
+            return "就业"
+        if "社会保险" in message or "社保" in message:
+            return "社会保险"
         if "创业" in message:
             return "创业补贴"
         if "就业" in message or "求职" in message:
-            return "就业补贴"
-        if "社保" in message:
-            return "社会保险"
+            return "就业"
         return None
 
     @staticmethod
@@ -30,11 +36,16 @@ class LocalPolicySearchTool:
         return None
 
     async def search(self, profile: UserProfile, message: str) -> list[PolicyCandidate]:
+        region = profile.city
+        topic = self._topic(message)
+        target_group = self._target_group(profile)
         records = self._repository.filter(
-            region=profile.city,
-            topic=self._topic(message),
-            target_group=self._target_group(profile),
+            region=region,
+            topic=topic,
+            target_group=target_group,
         )
+        if not records and target_group is not None:
+            records = self._repository.filter(region=region, topic=topic)
         return [
             PolicyCandidate(
                 policyId=record.policyId,
