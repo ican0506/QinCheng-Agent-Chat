@@ -7,7 +7,10 @@ from app.agent.nodes.policy_compare import PolicyCompareNode
 from app.agent.nodes.policy_search import PolicySearchNode
 from app.agent.nodes.profile import ProfileNode
 from app.agent.tools.mock import MockEligibilityTool, MockPlanTool, MockPolicyCompareTool, MockPolicySearchTool
+from app.agent.tools.local_policy import LocalPolicySearchTool
+from app.agent.tools.rule_eligibility import RuleEligibilityTool
 from app.models.chat import UserProfile
+from app.policy.repository import PolicyRepository
 
 
 class WorkflowAgent:
@@ -22,6 +25,16 @@ class WorkflowAgent:
     def default(cls, policy_search_tool: MockPolicySearchTool | None = None) -> WorkflowAgent:
         search_tool = policy_search_tool or MockPolicySearchTool()
         return cls(ProfileNode(), PolicySearchNode(search_tool), EligibilityNode(MockEligibilityTool()), PolicyCompareNode(MockPolicyCompareTool()), PlanNode(MockPlanTool()))
+
+    @classmethod
+    def production(cls, repository: PolicyRepository) -> WorkflowAgent:
+        return cls(
+            ProfileNode(),
+            PolicySearchNode(LocalPolicySearchTool(repository)),
+            EligibilityNode(RuleEligibilityTool(repository)),
+            PolicyCompareNode(MockPolicyCompareTool()),
+            PlanNode(MockPlanTool()),
+        )
 
     async def run(self, session_id: str, message: str, user_profile: UserProfile) -> GovernmentAgentState:
         state = GovernmentAgentState(sessionId=session_id, userMessage=message, userProfile=user_profile)
