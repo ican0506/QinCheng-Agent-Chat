@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from datetime import date
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ConditionOperator(str, Enum):
@@ -14,6 +15,20 @@ class ConditionOperator(str, Enum):
     NOT_IN = "not_in"
     EXISTS = "exists"
     WITHIN_YEARS = "within_years"
+
+
+class ValidityStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    EXPIRED = "EXPIRED"
+    HISTORICAL = "HISTORICAL"
+    UNKNOWN = "UNKNOWN"
+
+
+class ApplicationStatus(str, Enum):
+    OPEN = "OPEN"
+    CLOSED = "CLOSED"
+    NOT_STARTED = "NOT_STARTED"
+    UNKNOWN = "UNKNOWN"
 
 
 class PolicyCondition(BaseModel):
@@ -41,3 +56,12 @@ class PolicyRecord(BaseModel):
     requiredMaterials: list[str]
     process: list[str]
     isVerified: bool
+    sourceVerified: bool = False
+    validityStatus: ValidityStatus = ValidityStatus.UNKNOWN
+    lastVerifiedAt: date | None = None
+    sourcePublishedDate: date | None = None
+    basisDocuments: list[str] = Field(default_factory=list)
+    applicationStatus: ApplicationStatus = ApplicationStatus.UNKNOWN
+    applicationStartDate: date | None = None
+    applicationEndDate: date | None = None
+    applicableCohorts: list[str] = Field(default_factory=list)
