@@ -1,15 +1,10 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { ChatApiError, streamChatMessage } from "../services/chatApi";
-import {
-  applyMockAction,
-  createMockWorkspace,
-} from "../services/workspaceMock";
-import type { UserProfile } from "../types/chat";
+import type { ChatData } from "../types/chat";
+import { saveLatestChatData } from "../workspace/sessionState";
 import type {
-  AgentAction,
   ChatMessage,
   ChatSession,
-  WorkspaceState,
 } from "../types/agent";
 
 const STORAGE_KEY = "graduate-policy-agent-workbench-v1";
@@ -44,7 +39,6 @@ function createSession(): ChatSession {
     sessionId,
     title: "新对话",
     messages: [],
-    workspace: createMockWorkspace(sessionId),
   };
 }
 
@@ -59,14 +53,17 @@ function isChatMessage(value: unknown): value is ChatMessage {
     && typeof value.content === "string";
 }
 
-function isWorkspaceState(value: unknown): value is WorkspaceState {
+function isChatData(value: unknown): value is ChatData {
   return isRecord(value)
     && typeof value.sessionId === "string"
-    && isRecord(value.task)
-    && isRecord(value.profile)
-    && Array.isArray(value.documents)
-    && Array.isArray(value.policyMatches)
-    && Array.isArray(value.blocks);
+    && typeof value.replyText === "string"
+    && typeof value.needFollowUp === "boolean"
+    && Array.isArray(value.followUpQuestions)
+    && isRecord(value.userProfile)
+    && Array.isArray(value.policies)
+    && Array.isArray(value.eligibility)
+    && (value.plan === null || isRecord(value.plan))
+    && Array.isArray(value.materialResults);
 }
 
 function restoreSessions(): ChatSession[] {
@@ -86,21 +83,14 @@ function restoreSessions(): ChatSession[] {
         sessionId: value.sessionId,
         title: typeof value.title === "string" ? value.title : "历史对话",
         messages,
-        workspace: isWorkspaceState(value.workspace)
-          ? value.workspace
-          : createMockWorkspace(value.sessionId),
+        latestChatData: isChatData(value.latestChatData)
+          ? value.latestChatData
+          : undefined,
       }];
     });
   } catch {
     return [];
   }
-}
-
-function mergeProfile(current: UserProfile, incoming: UserProfile): UserProfile {
-  const definedFields = Object.fromEntries(
-    Object.entries(incoming).filter(([, value]) => value !== null && value !== undefined),
-  ) as UserProfile;
-  return { ...current, ...definedFields };
 }
 
 export function useAgentWorkbench() {
@@ -116,7 +106,7 @@ export function useAgentWorkbench() {
     sessions.value.find((session) => session.sessionId === activeSessionId.value),
   );
   const messages = computed(() => activeSession.value?.messages ?? []);
-  const workspace = computed(() => activeSession.value?.workspace);
+  const latestChatData = computed(() => activeSession.value?.latestChatData);
 
   function newSession(): void {
     controller?.abort();
@@ -146,10 +136,7 @@ export function useAgentWorkbench() {
     session.title = normalized.length > 18 ? `${normalized.slice(0, 18)}…` : normalized;
   }
 
-  async function send(
-    text = draft.value,
-    profileOverride?: UserProfile,
-  ): Promise<void> {
+  async function send(text = draft.value): Promise<void> {
     const content = text.trim();
     const session = activeSession.value;
     if (!content || busy.value || !session) return;
@@ -179,7 +166,7 @@ export function useAgentWorkbench() {
           sessionId: session.sessionId,
           userId,
           message: content,
-          userProfile: profileOverride ?? session.workspace.profile,
+          userProfile: session.latestChatData?.userProfile ?? {},
         },
         (chunk) => {
           assistantMessage.content += chunk;
@@ -188,10 +175,7 @@ export function useAgentWorkbench() {
       );
       assistantMessage.content = response.replyText;
       assistantMessage.status = "sent";
-      session.workspace.profile = mergeProfile(
-        session.workspace.profile,
-        response.userProfile,
-      );
+      saveLatestChatData(session, response);
     } catch (error) {
       assistantMessage.status = "error";
       if (error instanceof DOMException && error.name === "AbortError") {
@@ -220,14 +204,6 @@ export function useAgentWorkbench() {
     void send(userMessage.content);
   }
 
-  function runWorkspaceAction(action: AgentAction): void {
-    const session = activeSession.value;
-    if (!session || busy.value) return;
-    const transition = applyMockAction(session.workspace, action);
-    session.workspace = transition.state;
-    void send(transition.chatMessage, transition.state.profile);
-  }
-
   watch(
     sessions,
     (value) => {
@@ -251,7 +227,7 @@ export function useAgentWorkbench() {
     activeSession,
     activeSessionId,
     messages,
-    workspace,
+    latestChatData,
     draft,
     busy,
     sidebarOpen,
@@ -259,6 +235,5 @@ export function useAgentWorkbench() {
     selectSession,
     send,
     retry,
-    runWorkspaceAction,
   };
 }

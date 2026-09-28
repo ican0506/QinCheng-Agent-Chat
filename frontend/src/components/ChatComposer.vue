@@ -5,6 +5,7 @@ import { ArrowUp } from "@lucide/vue";
 const props = defineProps<{
   modelValue: string;
   busy: boolean;
+  inputHint?: string;
 }>();
 
 const emit = defineEmits<{
@@ -33,6 +34,15 @@ function keydown(event: KeyboardEvent): void {
   }
 }
 
+function focus(inputHint?: string): void {
+  const element = textarea.value;
+  if (!element) return;
+  element.focus();
+  if (inputHint) element.placeholder = inputHint;
+}
+
+defineExpose({ focus });
+
 watch(
   () => props.modelValue,
   async () => {
@@ -49,7 +59,7 @@ watch(
       :value="modelValue"
       rows="1"
       maxlength="20000"
-      placeholder="输入你想了解的问题"
+      :placeholder="inputHint || '输入你想了解的问题'"
       aria-label="消息输入框"
       @input="update"
       @keydown="keydown"

@@ -48,7 +48,7 @@ const emit = defineEmits<{
         <MessageSquare :size="16" />
         <span class="history-copy">
           <strong>{{ session.title }}</strong>
-          <small>{{ session.workspace.phaseLabel }}</small>
+          <small>{{ session.latestChatData ? (session.latestChatData.needFollowUp ? "等待补充信息" : "已获得分析结果") : "等待咨询" }}</small>
         </span>
       </button>
     </div>

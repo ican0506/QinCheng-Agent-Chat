@@ -114,9 +114,34 @@ button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px sol
 
 .agent-workspace { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid #dfe4eb; background: #f5f7fa; }
 .workspace-topbar > svg { flex: 0 0 auto; color: #43546e; }
-.mock-badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid #e5c98e; border-radius: 5px; color: #835110; background: #fff9eb; font-size: 10px; white-space: nowrap; }
 .workspace-scroll { min-height: 0; flex: 1; overflow-y: auto; }
-.mock-notice { padding: 10px 16px; border-bottom: 1px solid #eadfca; color: #72521f; background: #fff9ed; font-size: 11px; line-height: 1.55; }
+.workspace-empty { padding: 34px 20px; color: #667085; text-align: center; font-size: 12px; line-height: 1.6; }
+.workspace-empty strong { display: block; color: #344054; font-size: 13px; }
+.workspace-empty p, .workspace-muted { margin: 8px 0 0; color: #7a8496; font-size: 11px; line-height: 1.6; }
+.follow-up-list { display: grid; gap: 7px; }
+.follow-up-list button { padding: 9px 10px; border: 1px solid #cfd7e3; border-radius: 6px; color: #344054; background: #fff; text-align: left; font-size: 12px; line-height: 1.5; cursor: pointer; }
+.follow-up-list button:hover { border-color: #6e91cf; color: #155eef; background: #f5f8fd; }
+.match-reason { color: #52627a !important; }
+.policy-status--pass { color: #166445; background: #eaf7f0; }
+.policy-status--unknown, .policy-status--manual_review { color: #835110; background: #fff4d9; }
+.policy-status--fail { color: #9e2d24; background: #fff0ee; }
+.eligibility-detail { margin-top: 11px; padding: 10px; border: 1px solid #dbe5f4; border-radius: 6px; background: #f8fbff; color: #475467; font-size: 11px; line-height: 1.55; }
+.eligibility-detail > strong { color: #263249; font-size: 11px; }
+.eligibility-detail p { margin: 5px 0; }
+.eligibility-detail ul { margin: 7px 0 0; padding-left: 18px; }
+.eligibility-detail li { margin: 5px 0; }
+.eligibility-detail small { display: block; margin-top: 2px; color: #667085; }
+.plan-summary { margin: 9px 0 12px; color: #52627a; font-size: 12px; line-height: 1.6; }
+.plan-timeline { margin: 0; padding: 0; list-style: none; counter-reset: plan-step; }
+.plan-timeline > li { position: relative; padding: 0 0 16px 32px; color: #52627a; font-size: 11px; line-height: 1.6; }
+.plan-timeline > li::before { position: absolute; left: 0; top: 0; display: grid; place-items: center; width: 21px; height: 21px; border: 1px solid #b8c8e4; border-radius: 50%; color: #155eef; background: #f3f7ff; content: counter(plan-step); counter-increment: plan-step; font-size: 10px; font-weight: 700; }
+.plan-timeline > li:not(:last-child)::after { position: absolute; top: 22px; bottom: 0; left: 10px; width: 1px; background: #dce4f0; content: ""; }
+.plan-timeline > li > div { display: flex; justify-content: space-between; gap: 8px; }
+.plan-timeline strong { color: #273247; font-size: 12px; }
+.plan-timeline span { flex: 0 0 auto; color: #5d7191; font-size: 10px; }
+.plan-timeline p { margin: 4px 0; }
+.plan-timeline ul, .plan-notes { margin: 6px 0 0; padding-left: 17px; }
+.plan-notes { color: #667085; font-size: 11px; line-height: 1.6; }
 .workspace-section { padding: 16px; border-bottom: 1px solid #e3e7ed; background: #fff; }
 .workspace-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
 .workspace-section-heading > span { color: #263249; font-size: 13px; font-weight: 700; }
@@ -164,7 +189,6 @@ button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px sol
 .policy-status--potential { color: #166445; background: #eaf7f0; }
 .policy-status--pending { color: #835110; background: #fff4d9; }
 .policy-status--not_eligible { color: #9e2d24; background: #fff0ee; }
-.mock-policy-note { display: flex; align-items: center; gap: 5px; margin-top: 9px; color: #895f1d; font-size: 10px; }
 .policy-card > p { margin: 8px 0 10px; color: #657084; font-size: 11px; line-height: 1.55; }
 .policy-meta { display: grid; grid-template-columns: minmax(0, 1fr) 78px; margin: 0; border-top: 1px solid #edf0f3; }
 .policy-meta > div { min-width: 0; padding: 7px 6px; border-right: 1px solid #edf0f3; border-bottom: 1px solid #edf0f3; }

@@ -181,5 +181,5 @@ npm run build
 - 部分政策条件需要 `MANUAL_REVIEW`；
 - 部分政策的 `applicationStatus` 仍为 `UNKNOWN`；
 - 部分政策的官方材料和流程信息不完整；
-- 前端 Workspace 仍有部分 Mock 展示；
+- 前端 Workspace 由每个会话最近一次 SSE `done.data` 的真实 `ChatData` 驱动，展示后端返回的政策、资格辅助判断、补充问题、办理计划与官方来源；
 - 尚未实现 OCR、文件上传、材料识别、Dify、外部向量数据库和业务数据库持久化。

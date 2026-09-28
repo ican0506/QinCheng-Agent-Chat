@@ -21,6 +21,7 @@ const emit = defineEmits<{
 }>();
 
 const messageList = ref<HTMLElement | null>(null);
+const composer = ref<InstanceType<typeof ChatComposer> | null>(null);
 
 async function scrollToBottom(): Promise<void> {
   await nextTick();
@@ -34,6 +35,12 @@ function useSuggestion(text: string): void {
   emit("update:draft", text);
   emit("send", text);
 }
+
+function focusComposer(inputHint?: string): void {
+  composer.value?.focus(inputHint);
+}
+
+defineExpose({ focusComposer });
 
 watch(
   () => props.messages,
@@ -79,6 +86,7 @@ watch(
     <footer class="composer-area">
       <div class="composer-container">
         <ChatComposer
+          ref="composer"
           :model-value="draft"
           :busy="busy"
           @update:model-value="emit('update:draft', $event)"
