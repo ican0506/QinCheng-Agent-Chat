@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build --configLoader runner",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "vue-tsc --noEmit",
+    "test:workspace": "tsc --target ES2022 --module NodeNext --moduleResolution NodeNext --outDir .workspace-test --rootDir . tests/workspace-state.test.ts src/workspace/selectors.ts src/workspace/sessionState.ts && node .workspace-test/tests/workspace-state.test.js"
   },
   "dependencies": {
     "dompurify": "^3.2.6",

@@ -5,7 +5,6 @@ import AppSidebar from "./components/AppSidebar.vue";
 import ChatPanel from "./components/ChatPanel.vue";
 import AgentWorkspace from "./components/workspace/AgentWorkspace.vue";
 import { useAgentWorkbench } from "./composables/useAgentWorkbench";
-import type { AgentAction } from "./types/agent";
 
 const suggestions = [
   "我是今年毕业生，想了解本地就业补贴",
@@ -19,7 +18,7 @@ const {
   activeSession,
   activeSessionId,
   messages,
-  workspace,
+  latestChatData,
   draft,
   busy,
   sidebarOpen,
@@ -27,17 +26,18 @@ const {
   selectSession,
   send,
   retry,
-  runWorkspaceAction,
 } = useAgentWorkbench();
+const chatPanel = ref<InstanceType<typeof ChatPanel> | null>(null);
 
 function startSession(): void {
   newSession();
   mobileView.value = "chat";
 }
 
-function handleWorkspaceAction(action: AgentAction): void {
-  runWorkspaceAction(action);
+function handleFollowUp(question: string): void {
+  draft.value = "";
   mobileView.value = "chat";
+  chatPanel.value?.focusComposer(question);
 }
 </script>
 
@@ -62,8 +62,9 @@ function handleWorkspaceAction(action: AgentAction): void {
         </button>
       </nav>
 
-      <div v-if="activeSession && workspace" class="agent-columns">
+      <div v-if="activeSession" class="agent-columns">
         <ChatPanel
+          ref="chatPanel"
           :class="{ 'mobile-view-hidden': mobileView !== 'chat' }"
           :title="activeSession.title"
           :messages="messages"
@@ -77,9 +78,9 @@ function handleWorkspaceAction(action: AgentAction): void {
         />
         <AgentWorkspace
           :class="{ 'mobile-view-hidden': mobileView !== 'workspace' }"
-          :state="workspace"
+          :data="latestChatData"
           :busy="busy"
-          @action="handleWorkspaceAction"
+          @follow-up="handleFollowUp"
         />
       </div>
     </main>

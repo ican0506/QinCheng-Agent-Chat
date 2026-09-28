@@ -1,22 +1,13 @@
 <script setup lang="ts">
-import type { Component } from "vue";
-import { FlaskConical, PanelRight } from "@lucide/vue";
-import FileRequestBlock from "./FileRequestBlock.vue";
-import MissingFieldBlock from "./MissingFieldBlock.vue";
-import PolicyMatchBlock from "./PolicyMatchBlock.vue";
+import { PanelRight } from "@lucide/vue";
+import FollowUpBlock from "./FollowUpBlock.vue";
+import PlanTimeline from "./PlanTimeline.vue";
+import PolicyResultList from "./PolicyResultList.vue";
 import ProfileSummaryBlock from "./ProfileSummaryBlock.vue";
-import TaskProgress from "./TaskProgress.vue";
-import type { AgentAction, WorkspaceBlock, WorkspaceState } from "../../types/agent";
+import type { ChatData } from "../../types/chat";
 
-defineProps<{ state: WorkspaceState; busy: boolean }>();
-const emit = defineEmits<{ action: [action: AgentAction] }>();
-
-const blockComponents: Record<WorkspaceBlock["type"], Component> = {
-  missing_field: MissingFieldBlock,
-  profile_summary: ProfileSummaryBlock,
-  file_request: FileRequestBlock,
-  policy_matches: PolicyMatchBlock,
-};
+defineProps<{ data?: ChatData; busy: boolean }>();
+const emit = defineEmits<{ followUp: [question: string] }>();
 </script>
 
 <template>
@@ -25,24 +16,24 @@ const blockComponents: Record<WorkspaceBlock["type"], Component> = {
       <PanelRight :size="19" />
       <div class="panel-heading-copy">
         <strong>Agent 工作台</strong>
-        <span>{{ state.phaseLabel }}</span>
+        <span>{{ busy ? "Agent 正在分析…" : data ? "基于最近一次 Agent 结果" : "等待咨询" }}</span>
       </div>
-      <span class="mock-badge"><FlaskConical :size="13" />交互演示</span>
     </header>
 
     <div class="workspace-scroll">
-      <div class="mock-notice">
-        当前工作区由前端演示状态驱动，未执行政策检索、资格判断或文件解析。
+      <div v-if="!data && !busy" class="workspace-empty">
+        <strong>尚未咨询</strong>
+        <p>发送问题后，这里会展示政策匹配、资格辅助判断和办理计划。</p>
       </div>
-      <TaskProgress :task="state.task" />
-      <component
-        :is="blockComponents[block.type]"
-        v-for="block in state.blocks"
-        :key="block.id"
-        :block="block"
-        :disabled="busy"
-        @action="emit('action', $event)"
-      />
+      <div v-else-if="busy && !data" class="workspace-empty">
+        <strong>Agent 正在分析…</strong><p>结果将在本次回复完成后显示。</p>
+      </div>
+      <template v-if="data">
+        <ProfileSummaryBlock :profile="data.userProfile" />
+        <FollowUpBlock v-if="data.needFollowUp && data.followUpQuestions.length" :questions="data.followUpQuestions" @select="emit('followUp', $event)" />
+        <PolicyResultList :policies="data.policies" :data="data" />
+        <PlanTimeline :plan="data.plan" />
+      </template>
     </div>
   </aside>
 </template>
