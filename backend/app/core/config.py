@@ -17,6 +17,7 @@ class Settings:
     cors_origins: tuple[str, ...]
     session_history_limit: int
     session_limit: int
+    profile_extraction_enabled: bool = False
 
     @property
     def llm_configured(self) -> bool:
@@ -44,4 +45,5 @@ class Settings:
             cors_origins=origins,
             session_history_limit=int(os.getenv("SESSION_HISTORY_LIMIT", "40")),
             session_limit=int(os.getenv("SESSION_LIMIT", "1000")),
+            profile_extraction_enabled=os.getenv("PROFILE_EXTRACTION_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
         )
