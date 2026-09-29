@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from enum import Enum
 from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -34,6 +35,25 @@ class UserProfile(BaseModel):
     fields: list[ProfileField] = Field(default_factory=list)
 
 
+class MaterialStatus(str, Enum):
+    READY = "READY"
+    MISSING = "MISSING"
+    UNKNOWN = "UNKNOWN"
+    MANUAL_REVIEW = "MANUAL_REVIEW"
+
+
+class MaterialCheckResult(BaseModel):
+    materialId: str
+    policyId: str
+    materialName: str
+    description: str | None = None
+    status: MaterialStatus
+    reason: str
+    source: str = "POLICY"
+    userProvided: bool = False
+    needsManualReview: bool = False
+
+
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -52,7 +72,7 @@ class ChatData(BaseModel):
     policies: list[dict[str, Any]] = Field(default_factory=list)
     eligibility: list[dict[str, Any]] = Field(default_factory=list)
     plan: dict[str, Any] | None = None
-    materialResults: list[dict[str, Any]] = Field(default_factory=list)
+    materialResults: list[MaterialCheckResult] = Field(default_factory=list)
 
 
 T = TypeVar("T")

@@ -5,6 +5,8 @@ import AppSidebar from "./components/AppSidebar.vue";
 import ChatPanel from "./components/ChatPanel.vue";
 import AgentWorkspace from "./components/workspace/AgentWorkspace.vue";
 import { useAgentWorkbench } from "./composables/useAgentWorkbench";
+import { materialDeclarationMessage } from "./workspace/materials";
+import type { MaterialResult } from "./types/chat";
 
 const suggestions = [
   "我是今年毕业生，想了解本地就业补贴",
@@ -38,6 +40,13 @@ function handleFollowUp(question: string): void {
   draft.value = "";
   mobileView.value = "chat";
   chatPanel.value?.focusComposer(question);
+}
+
+function handleMaterialDeclaration(materialId: string, prepared: boolean): void {
+  const material = latestChatData.value?.materialResults.find((item) => item.materialId === materialId);
+  if (!material) return;
+  mobileView.value = "chat";
+  void send(materialDeclarationMessage(material as MaterialResult, prepared));
 }
 </script>
 
@@ -81,6 +90,7 @@ function handleFollowUp(question: string): void {
           :data="latestChatData"
           :busy="busy"
           @follow-up="handleFollowUp"
+          @material-declare="handleMaterialDeclaration"
         />
       </div>
     </main>

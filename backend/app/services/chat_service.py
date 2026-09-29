@@ -64,15 +64,19 @@ class ChatService:
             policies=[policy.model_dump(mode="json") for policy in state.candidatePolicies],
             eligibility=[result.model_dump(mode="json") for result in state.eligibilityResults],
             plan=state.overallPlan.model_dump(mode="json") if state.overallPlan else None,
-            materialResults=[],
+            materialResults=state.materialResults,
         )
 
     async def _run_workflow(self, request: ChatRequest) -> GovernmentAgentState:
-        return await self._workflow_agent.run(
+        declarations = await self._store.get_material_declarations(request.sessionId, request.userId)
+        state = await self._workflow_agent.run(
             session_id=request.sessionId,
             message=request.message.strip(),
             user_profile=request.userProfile,
+            material_declarations=declarations,
         )
+        await self._store.set_material_declarations(request.sessionId, request.userId, state.materialDeclarations)
+        return state
 
     async def chat(self, request: ChatRequest) -> ChatData:
         state = await self._run_workflow(request)

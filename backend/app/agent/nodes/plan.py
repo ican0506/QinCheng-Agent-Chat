@@ -10,7 +10,11 @@ class PlanNode:
 
     async def execute(self, state: GovernmentAgentState) -> GovernmentAgentState:
         state.overallPlan = await self._tool.build_plan(
-            state.userProfile, state.candidatePolicies, state.eligibilityResults, state.policyRelations
+            state.userProfile,
+            state.candidatePolicies,
+            state.eligibilityResults,
+            state.policyRelations,
+            state.materialResults,
         )
         state.stage = AgentStage.COMPLETED
         state.nextAction = (

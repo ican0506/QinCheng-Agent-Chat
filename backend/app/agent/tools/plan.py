@@ -12,6 +12,7 @@ from app.agent.models import (
     PolicyRelationType,
 )
 from app.models.chat import UserProfile
+from app.models.chat import MaterialCheckResult, MaterialStatus
 from app.policy.models import ApplicationStatus, ValidityStatus
 from app.policy.repository import PolicyRepository
 
@@ -39,6 +40,7 @@ class DeterministicPlanTool:
         policies: list[PolicyCandidate],
         eligibility: list[EligibilityResult],
         relations: list[PolicyRelation],
+        material_results: list[MaterialCheckResult] | None = None,
     ) -> OverallPlan:
         result_by_policy = {item.policyId: item for item in eligibility}
         ordered_policies = self._ordered_policies(policies, relations)
@@ -47,7 +49,7 @@ class DeterministicPlanTool:
             result = result_by_policy.get(policy.policyId)
             if result is None:
                 continue
-            steps.extend(self._policy_steps(policy, result))
+            steps.extend(self._policy_steps(policy, result, material_results or []))
         steps.sort(key=lambda item: (item.priority, self._first_policy_rank(item, ordered_policies), item.stepId))
         return OverallPlan(
             summary="已依据政策资格、时效、申报窗口和已核验关系生成办理路径。",
@@ -79,7 +81,7 @@ class DeterministicPlanTool:
             for field, policy_ids in sorted(fields.items())
         ]
 
-    def _policy_steps(self, policy: PolicyCandidate, result: EligibilityResult) -> list[PlanStep]:
+    def _policy_steps(self, policy: PolicyCandidate, result: EligibilityResult, material_results: list[MaterialCheckResult]) -> list[PlanStep]:
         record = self._repository.get_by_id(policy.policyId)
         if record is None:
             return [self._notice(policy, "缺少本地结构化政策记录，暂不能规划申请步骤。")]
@@ -109,26 +111,37 @@ class DeterministicPlanTool:
                 priority=20, status=PlanStepStatus.BLOCKED,
             )]
         if result.overallStatus is EligibilityStatus.MANUAL_REVIEW:
-            return self._material_steps(policy, PlanStepStatus.PENDING) + [PlanStep(
+            return self._material_steps(policy, PlanStepStatus.PENDING, material_results) + [PlanStep(
                 stepId=f"manual-review:{policy.policyId}", title=f"人工核验{policy.name}资格",
                 description="准备相关证明材料并向经办机构进行人工核验。",
                 policyIds=[policy.policyId], actionType=PlanActionType.MANUAL_REVIEW,
                 priority=40, status=PlanStepStatus.BLOCKED,
             )]
         application_note = "申报窗口状态待确认，请在提交前核对官方安排。" if record.applicationStatus is ApplicationStatus.UNKNOWN else ""
-        return self._material_steps(policy, PlanStepStatus.PENDING) + [PlanStep(
+        return self._material_steps(policy, PlanStepStatus.PENDING, material_results) + [PlanStep(
             stepId=f"apply-policy:{policy.policyId}", title=f"申请{policy.name}",
             description=f"资格条件当前满足。{application_note}", policyIds=[policy.policyId],
             actionType=PlanActionType.APPLY_POLICY, priority=50, status=PlanStepStatus.READY,
         )]
 
     @staticmethod
-    def _material_steps(policy: PolicyCandidate, status: PlanStepStatus) -> list[PlanStep]:
+    def _material_steps(policy: PolicyCandidate, status: PlanStepStatus, material_results: list[MaterialCheckResult]) -> list[PlanStep]:
         if not policy.requiredMaterials:
             return []
+        relevant = [item for item in material_results if item.policyId == policy.policyId]
+        missing = [item.materialName for item in relevant if item.status is MaterialStatus.MISSING]
+        unknown = [item.materialName for item in relevant if item.status is MaterialStatus.UNKNOWN]
+        manual = [item.materialName for item in relevant if item.status is MaterialStatus.MANUAL_REVIEW]
+        detail = "按已记录的官方材料要求准备申请材料。"
+        if missing:
+            detail = f"以下材料尚未准备：{'、'.join(missing)}。"
+        elif unknown:
+            detail = f"请确认以下材料准备情况：{'、'.join(unknown)}。"
+        elif manual:
+            detail = f"以下材料需经办机构或人工核验：{'、'.join(manual)}。"
         return [PlanStep(
             stepId=f"prepare-materials:{policy.policyId}", title=f"准备{policy.name}材料",
-            description="按已记录的官方材料要求准备申请材料。", policyIds=[policy.policyId],
+            description=detail, policyIds=[policy.policyId],
             requiredMaterials=policy.requiredMaterials, actionType=PlanActionType.PREPARE_MATERIALS,
             priority=30, status=status,
         )]

@@ -142,6 +142,15 @@ button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px sol
 .plan-timeline p { margin: 4px 0; }
 .plan-timeline ul, .plan-notes { margin: 6px 0 0; padding-left: 17px; }
 .plan-notes { color: #667085; font-size: 11px; line-height: 1.6; }
+.material-card { margin-top: 10px; padding: 11px; border: 1px solid #dce2ea; border-radius: 7px; background: #fff; }
+.material-card > p { margin: 5px 0 0; color: #667085; font-size: 11px; line-height: 1.55; }
+.material-status { flex: 0 0 auto; padding: 3px 6px; border-radius: 4px; font-size: 10px; }
+.material-status--ready { color: #166445; background: #eaf7f0; }
+.material-status--missing { color: #9e2d24; background: #fff0ee; }
+.material-status--unknown, .material-status--manual_review { color: #835110; background: #fff4d9; }
+.material-actions { display: flex; gap: 7px; margin-top: 9px; }
+.material-actions button { padding: 5px 8px; border: 1px solid #cbd6e5; border-radius: 5px; color: #2459aa; background: #fff; font-size: 11px; cursor: pointer; }
+.material-actions button:disabled { opacity: .55; cursor: default; }
 .workspace-section { padding: 16px; border-bottom: 1px solid #e3e7ed; background: #fff; }
 .workspace-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
 .workspace-section-heading > span { color: #263249; font-size: 13px; font-weight: 700; }
