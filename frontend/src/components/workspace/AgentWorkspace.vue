@@ -7,10 +7,16 @@ import PolicyResultList from "./PolicyResultList.vue";
 import ProfileSummaryBlock from "./ProfileSummaryBlock.vue";
 import type { ChatData, MaterialResult } from "../../types/chat";
 import { computed } from "vue";
+import { isPolicyMaterialReferenceOnly } from "../../workspace/selectors";
 
 const props = defineProps<{ data?: ChatData; busy: boolean }>();
 const emit = defineEmits<{ followUp: [question: string]; materialDeclare: [materialId: string, prepared: boolean] }>();
 const policyNames = computed(() => Object.fromEntries((props.data?.policies ?? []).map((policy) => [policy.policyId, policy.name])));
+const referenceOnlyPolicyIds = computed(() => new Set(
+  (props.data?.policies ?? [])
+    .filter((policy) => isPolicyMaterialReferenceOnly(props.data, policy.policyId))
+    .map((policy) => policy.policyId),
+));
 function declareMaterial(material: MaterialResult, prepared: boolean): void {
   emit("materialDeclare", material.materialId, prepared);
 }
@@ -38,7 +44,7 @@ function declareMaterial(material: MaterialResult, prepared: boolean): void {
         <ProfileSummaryBlock :profile="data.userProfile" />
         <FollowUpBlock v-if="data.needFollowUp && data.followUpQuestions.length" :questions="data.followUpQuestions" @select="emit('followUp', $event)" />
         <PolicyResultList :policies="data.policies" :data="data" />
-        <MaterialChecklist :results="data.materialResults" :policy-names="policyNames" :busy="busy" @declare="declareMaterial" />
+        <MaterialChecklist :results="data.materialResults" :policy-names="policyNames" :reference-policy-ids="referenceOnlyPolicyIds" :busy="busy" @declare="declareMaterial" />
         <PlanTimeline :plan="data.plan" />
       </template>
     </div>

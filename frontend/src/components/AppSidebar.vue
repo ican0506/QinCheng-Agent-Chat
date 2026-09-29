@@ -22,7 +22,7 @@ const emit = defineEmits<{
       <div class="brand-mark"><GraduationCap :size="21" /></div>
       <div class="brand-copy">
         <strong>青程 Agent</strong>
-        <span>应届毕业生就业政策</span>
+        <span>高校毕业生就业创业政策智能助手</span>
       </div>
       <button class="icon-button sidebar-close" type="button" title="关闭侧栏" @click="emit('close')">
         <X :size="19" />

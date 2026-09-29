@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.agent.models import PolicyCandidate
+from app.agent.tools.policy_intent import allows_policy_for_intent
 from app.models.chat import UserProfile
 from app.policy.repository import PolicyRepository
 
@@ -12,7 +13,13 @@ class LocalPolicySearchTool:
         self._repository = repository
 
     @staticmethod
-    def _topic(message: str) -> str | None:
+    def _topic(profile: UserProfile, message: str) -> str | None:
+        if profile.entrepreneurshipIntent is False:
+            if "灵活就业" in message or "社保" in message or "社会保险" in message:
+                return "社会保险"
+            if profile.jobSeekingIntent:
+                return "就业"
+            return None
         if "求职创业补贴" in message:
             return "求职创业补贴"
         if "就业见习" in message:
@@ -37,7 +44,7 @@ class LocalPolicySearchTool:
 
     async def search(self, profile: UserProfile, message: str) -> list[PolicyCandidate]:
         region = profile.city
-        topic = self._topic(message)
+        topic = self._topic(profile, message)
         target_group = self._target_group(profile)
         records = self._repository.filter(
             region=region,
@@ -46,6 +53,7 @@ class LocalPolicySearchTool:
         )
         if not records and target_group is not None:
             records = self._repository.filter(region=region, topic=topic)
+        records = [record for record in records if allows_policy_for_intent(profile, record)]
         return [
             PolicyCandidate(
                 policyId=record.policyId,

@@ -118,7 +118,7 @@ def test_second_turn_sends_server_side_history_to_provider() -> None:
     ]
 
 
-def test_stream_chat_emits_chunks_and_saves_history() -> None:
+def test_normal_llm_streaming_emits_delta_then_done_and_saves_history() -> None:
     provider = StreamingProvider(["第二轮回答"])
     client = TestClient(create_app(settings(), provider))
 
@@ -128,6 +128,7 @@ def test_stream_chat_emits_chunks_and_saves_history() -> None:
     assert response.headers["content-type"].startswith("text/event-stream")
     events = parse_sse(response.text)
     assert [event for event, _ in events] == ["delta", "delta", "done"]
+    assert "error" not in [event for event, _ in events]
     assert events[0][1] == {"text": "第一段"}
     assert events[1][1] == {"text": "，第二段。"}
     assert events[2][1]["data"]["replyText"] == "第一段，第二段。"
@@ -167,26 +168,24 @@ def test_session_cannot_be_reused_by_another_user() -> None:
     assert response.json()["code"] == 1001
 
 
-def test_llm_timeout_uses_error_code_5002() -> None:
+def test_llm_timeout_keeps_structured_fallback_result() -> None:
     client = TestClient(create_app(settings(), TimeoutProvider()))
 
     response = client.post("/api/agent/chat", json=payload())
 
-    assert response.status_code == 504
-    assert response.json()["code"] == 5002
-    assert response.json()["data"] is None
+    assert response.status_code == 200
+    assert response.json()["data"]["replyText"]
 
 
-def test_stream_timeout_uses_error_event() -> None:
+def test_stream_timeout_keeps_done_event() -> None:
     client = TestClient(create_app(settings(), TimeoutProvider()))
 
     response = client.post("/api/agent/chat/stream", json=payload())
 
     assert response.status_code == 200
     events = parse_sse(response.text)
-    assert events[-1][0] == "error"
-    assert events[-1][1]["code"] == 5002
-    assert events[-1][1]["data"] is None
+    assert events[-1][0] == "done"
+    assert events[-1][1]["data"]["replyText"]
 
 
 def test_health_never_exposes_api_key() -> None:

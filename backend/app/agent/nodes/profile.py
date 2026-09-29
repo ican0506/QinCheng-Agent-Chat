@@ -17,7 +17,7 @@ class ProfileNode:
         if missing:
             state.needFollowUp = True
             state.followUpQuestions = [self._questions[field] for field in missing]
-            state.nextAction = "补充个人画像后继续检索 Demo 政策。"
+            state.nextAction = "补充个人画像后继续检索相关政策。"
             return state
         state.needFollowUp = False
         state.followUpQuestions = []

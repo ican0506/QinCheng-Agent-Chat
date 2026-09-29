@@ -30,6 +30,7 @@ class UserProfile(BaseModel):
     unemploymentStatus: str | None = Field(default=None, exclude=True)
     flexibleEmploymentInsurance: bool | None = Field(default=None, exclude=True)
     jobSeekingIntent: bool | None = Field(default=None, exclude=True)
+    entrepreneurshipIntent: bool | None = Field(default=None, exclude=True)
     hardshipIdentity: str | None = Field(default=None, exclude=True)
     housingStatus: Literal["租房", "自有", "其他"] | None = None
     fields: list[ProfileField] = Field(default_factory=list)

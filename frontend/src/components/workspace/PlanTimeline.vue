@@ -12,7 +12,7 @@ const statusLabels: Record<PlanStepStatus, string> = { PENDING: "待处理", BLO
     <p v-if="!plan" class="workspace-muted">暂无办理计划。</p>
     <template v-else>
       <p class="plan-summary">{{ plan.summary }}</p>
-      <ol v-if="plan.steps.length" class="plan-timeline"><li v-for="step in plan.steps" :key="step.stepId"><div><strong>{{ step.title }}</strong><span>{{ actionLabels[step.actionType] }} · {{ statusLabels[step.status] }}</span></div><p>{{ step.description }}</p><ul v-if="step.requiredMaterials.length"><li v-for="material in step.requiredMaterials" :key="material">{{ material }}</li></ul><p v-else class="workspace-muted">暂无明确材料信息</p></li></ol>
+      <ol v-if="plan.steps.length" class="plan-timeline"><li v-for="step in plan.steps" :key="step.stepId"><div><strong>{{ step.title }}</strong><span>{{ actionLabels[step.actionType] }} · {{ statusLabels[step.status] }}</span></div><p>{{ step.description }}</p><ul v-if="step.requiredMaterials.length"><li v-for="material in step.requiredMaterials" :key="material">{{ material }}</li></ul></li></ol>
       <p v-else class="workspace-muted">暂无具体办理步骤。</p>
       <ul v-if="plan.notes.length" class="plan-notes"><li v-for="note in plan.notes" :key="note">{{ note }}</li></ul>
     </template>

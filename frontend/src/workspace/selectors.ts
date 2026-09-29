@@ -7,6 +7,14 @@ export function getEligibilityByPolicyId(
   return data?.eligibility.find((item) => item.policyId === policyId);
 }
 
+export function isPolicyMaterialReferenceOnly(data: ChatData | undefined, policyId: string): boolean {
+  const eligibility = getEligibilityByPolicyId(data, policyId);
+  return Boolean(
+    eligibility?.conditionResults.some((item) => item.conditionId === "policy-validity")
+    || eligibility?.summary.includes("申报窗口已关闭"),
+  );
+}
+
 export interface ProfileDisplayItem {
   key: string;
   label: string;

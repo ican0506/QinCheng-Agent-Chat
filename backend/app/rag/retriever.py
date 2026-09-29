@@ -26,6 +26,7 @@ class InMemoryRagRetriever:
         topic: str | None = None,
         target_group: str | None = None,
         validity_statuses: set[str] | None = None,
+        policy_ids: set[str] | None = None,
     ) -> list[tuple[RagChunk, Counter[str]]]:
         return [
             (chunk, terms)
@@ -34,6 +35,7 @@ class InMemoryRagRetriever:
             and (topic is None or topic in chunk.topics)
             and (target_group is None or target_group in chunk.targetGroups)
             and (validity_statuses is None or chunk.validityStatus in validity_statuses)
+            and (policy_ids is None or chunk.policyId in policy_ids)
         ]
 
     def search(
@@ -44,6 +46,7 @@ class InMemoryRagRetriever:
         topic: str | None = None,
         target_group: str | None = None,
         validity_statuses: set[str] | None = None,
+        policy_ids: set[str] | None = None,
         include_historical: bool = False,
         top_k: int = 5,
     ) -> list[RagSearchHit]:
@@ -56,6 +59,7 @@ class InMemoryRagRetriever:
             topic=topic,
             target_group=target_group,
             validity_statuses=validity_statuses,
+            policy_ids=policy_ids,
         ):
             score = self._cosine_similarity(query_terms, terms)
             if score < self.minimum_score:

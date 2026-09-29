@@ -106,20 +106,19 @@ def test_historical_closed_notice_is_not_returned_as_current_pass() -> None:
     assert "申报窗口已关闭" in result["summary"]
 
 
-def test_stream_done_keeps_real_chat_data_contract() -> None:
+def test_stream_follow_up_can_emit_done_without_delta_and_keeps_contract() -> None:
     client = TestClient(create_app(settings(), RecordingProvider()))
     response = client.post("/api/agent/chat/stream", json=payload("我想申请创业社会保险补贴", {
-        "graduationDate": "2025-06-30",
-        "socialInsuranceMonths": 12,
         "businessRegistrationMonths": 12,
     }))
 
     assert response.status_code == 200
     events = parse_sse(response.text)
-    assert [event for event, _ in events] == ["delta", "delta", "done"]
+    assert [event for event, _ in events] == ["done"]
     data = events[-1][1]["data"]
     assert set(data) == {"sessionId", "replyText", "needFollowUp", "followUpQuestions", "userProfile", "policies", "eligibility", "plan", "materialResults"}
     assert data["policies"]
+    assert data["needFollowUp"] is True
     assert all(not policy["policyId"].startswith("DEMO-") for policy in data["policies"])
 
 
