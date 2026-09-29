@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from app.core.errors import InvalidRequestError
 from app.services.llm.base import LLMMessage
+from app.models.chat import UserProfile
 
 
 @dataclass
@@ -13,6 +14,7 @@ class SessionRecord:
     user_id: str
     messages: list[LLMMessage] = field(default_factory=list)
     material_declarations: dict[str, bool] = field(default_factory=dict)
+    internal_profile: UserProfile = field(default_factory=UserProfile)
 
 
 class InMemorySessionStore:
@@ -75,3 +77,22 @@ class InMemorySessionStore:
             elif record.user_id != user_id:
                 raise InvalidRequestError("sessionId 与 userId 不匹配")
             record.material_declarations = dict(declarations)
+
+    async def get_internal_profile(self, session_id: str, user_id: str) -> UserProfile:
+        async with self._lock:
+            record = self._sessions.get(session_id)
+            if record is None:
+                return UserProfile()
+            if record.user_id != user_id:
+                raise InvalidRequestError("sessionId 与 userId 不匹配")
+            return record.internal_profile.model_copy(deep=True)
+
+    async def set_internal_profile(self, session_id: str, user_id: str, profile: UserProfile) -> None:
+        async with self._lock:
+            record = self._sessions.get(session_id)
+            if record is None:
+                record = SessionRecord(user_id=user_id)
+                self._sessions[session_id] = record
+            elif record.user_id != user_id:
+                raise InvalidRequestError("sessionId 与 userId 不匹配")
+            record.internal_profile = profile.model_copy(deep=True)

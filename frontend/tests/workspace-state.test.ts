@@ -1,4 +1,4 @@
-import { getEligibilityByPolicyId, profileDisplayItems, safeSourceUrl } from "../src/workspace/selectors.js";
+import { getEligibilityByPolicyId, isPolicyMaterialReferenceOnly, profileDisplayItems, safeSourceUrl } from "../src/workspace/selectors.js";
 import { saveLatestChatData } from "../src/workspace/sessionState.js";
 import { materialDeclarationMessage, materialStatusLabels } from "../src/workspace/materials.js";
 import type { ChatData } from "../src/types/chat.js";
@@ -34,3 +34,12 @@ const material = { materialId: "policy-a:material", policyId: "policy-a", materi
 assert(materialStatusLabels.READY === "已准备" && materialStatusLabels.MANUAL_REVIEW === "需人工核验", "材料状态应使用固定中文映射");
 assert(materialDeclarationMessage(material, true) === "我已经准备好营业执照", "材料操作必须生成发送给后端的自然语言声明");
 assert(result.materialResults.length === 0, "空材料结果不得在前端伪造材料");
+const historicalClosed: ChatData = {
+  ...result,
+  eligibility: [{
+    policyId: "policy-a", overallStatus: "MANUAL_REVIEW", missingFields: [],
+    summary: "该记录为历史通知，当前申报窗口已关闭。",
+    conditionResults: [{ conditionId: "policy-validity", description: "政策时效性", status: "MANUAL_REVIEW", reason: "该记录为历史政策或历史申报通知，不能作为当前申请依据。", userEvidence: null, policyEvidence: null }],
+  }],
+};
+assert(isPolicyMaterialReferenceOnly(historicalClosed, "policy-a"), "历史或已关闭政策的材料必须降级为只读参考");

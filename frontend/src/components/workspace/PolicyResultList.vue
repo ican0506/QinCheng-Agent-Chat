@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { BookOpenCheck, ExternalLink } from "@lucide/vue";
 import { getEligibilityByPolicyId, safeSourceUrl } from "../../workspace/selectors";
-import type { ChatData, EligibilityStatus, PolicyCandidate } from "../../types/chat";
+import type { ChatData, PolicyCandidate } from "../../types/chat";
+import { eligibilityStatusLabels as statusLabels } from "../../workspace/statuses";
 
 defineProps<{ policies: PolicyCandidate[]; data: ChatData }>();
-const statusLabels: Record<EligibilityStatus, string> = { PASS: "基本符合", FAIL: "当前不符合", UNKNOWN: "信息不足", MANUAL_REVIEW: "需要人工核验" };
 </script>
 
 <template>

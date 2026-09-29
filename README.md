@@ -177,6 +177,8 @@ npm run typecheck
 npm run build
 ```
 
+比赛演示输入与预期结果见 [docs/COMPETITION_SCENARIOS.md](docs/COMPETITION_SCENARIOS.md)，发布前检查见 [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)。
+
 ## 当前限制
 
 - 当前政策库仅有 5 条真实苏州市政策，不覆盖全国或完整苏州市全部政策；

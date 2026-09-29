@@ -4,6 +4,7 @@ import re
 
 from app.agent.models import PolicyCandidate
 from app.agent.tools.local_policy import LocalPolicySearchTool
+from app.agent.tools.policy_intent import allowed_policy_ids
 from app.models.chat import UserProfile
 from app.policy.repository import PolicyRepository
 from app.rag.models import RagSearchHit
@@ -33,17 +34,27 @@ class RagPolicySearchTool:
     def search_with_evidence(self, profile: UserProfile, message: str) -> list[RagSearchHit]:
         if self._retriever is None:
             raise RuntimeError("本地政策原文索引不可用")
+        policy_ids = allowed_policy_ids(profile, self._repository.filter())
+        if not policy_ids:
+            return []
         return self._retriever.search(
             message,
             region=profile.city,
-            topic=self._topic(message),
+            topic=self._topic(profile, message),
             target_group=self._target_group(profile, message),
+            policy_ids=policy_ids,
             include_historical=self._asks_for_historical_record(message),
             top_k=8,
         )
 
     @staticmethod
-    def _topic(message: str) -> str | None:
+    def _topic(profile: UserProfile, message: str) -> str | None:
+        if profile.entrepreneurshipIntent is False:
+            if "灵活就业" in message or "社保" in message or "社会保险" in message:
+                return "社会保险"
+            if profile.jobSeekingIntent:
+                return "就业"
+            return None
         if "求职创业补贴" in message:
             return "求职创业补贴"
         if "就业见习" in message:

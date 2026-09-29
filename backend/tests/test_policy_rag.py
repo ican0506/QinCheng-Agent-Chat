@@ -107,3 +107,24 @@ def test_rag_failure_falls_back_to_local_policy_search() -> None:
 
     assert candidates
     assert all(candidate.isMock is False for candidate in candidates)
+
+
+def test_explicit_non_entrepreneurial_intent_filters_startup_topic_records_for_rag_and_fallback() -> None:
+    class BrokenRetriever:
+        def search(self, *args, **kwargs):
+            raise RuntimeError("index unavailable")
+
+    intent_profile = UserProfile(
+        city="苏州市",
+        jobSeekingIntent=True,
+        entrepreneurshipIntent=False,
+    )
+    local_tool = LocalPolicySearchTool(repository())
+    rag_tool = RagPolicySearchTool(retriever(), repository(), local_tool)
+    fallback_tool = RagPolicySearchTool(BrokenRetriever(), repository(), local_tool)
+
+    for candidates in (
+        asyncio.run(rag_tool.search(intent_profile, "我不创业，只打算找工作")),
+        asyncio.run(fallback_tool.search(intent_profile, "我不创业，只打算找工作")),
+    ):
+        assert all("创业补贴" not in repository().get_by_id(candidate.policyId).topics for candidate in candidates)
