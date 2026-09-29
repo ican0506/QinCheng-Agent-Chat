@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 import json
+import logging
+from time import perf_counter
 from typing import Literal
 
 from app.agent.models import GovernmentAgentState
@@ -12,6 +14,10 @@ from app.core.errors import LLMServiceError
 from app.services.llm.base import LLMMessage, LLMProvider
 from app.stores.session_store import InMemorySessionStore
 from app.services.profile_update_parser import ProfileUpdateParser
+from app.services.llm_profile_extractor import LLMProfileExtractor, ProfileExtractionError
+
+
+logger = logging.getLogger(__name__)
 
 
 SYSTEM_PROMPT = """你是面向应届毕业生的就业创业政策对话助手。
@@ -31,10 +37,11 @@ class ChatStreamEvent:
 
 
 class ChatService:
-    def __init__(self, provider: LLMProvider, store: InMemorySessionStore, workflow_agent: WorkflowAgent) -> None:
+    def __init__(self, provider: LLMProvider, store: InMemorySessionStore, workflow_agent: WorkflowAgent, profile_extractor: LLMProfileExtractor | None = None) -> None:
         self._provider = provider
         self._store = store
         self._workflow_agent = workflow_agent
+        self._profile_extractor = profile_extractor
 
     async def _messages(
         self, request: ChatRequest, state: GovernmentAgentState
@@ -115,8 +122,28 @@ class ChatService:
             for name in request.userProfile.__class__.model_fields
             if getattr(request.userProfile, name) is not None
         }
-        parsed_values = ProfileUpdateParser.parse(request.message)
-        profile = stored_profile.model_copy(update={**request_values, **parsed_values})
+        rule_patch = ProfileUpdateParser.parse(request.message)
+        llm_patch: dict[str, object] = {}
+        extraction_source = "rule"
+        fallback_reason: str | None = None
+        if self._profile_extractor is not None:
+            started_at = perf_counter()
+            try:
+                llm_patch = await self._profile_extractor.extract(request.message, stored_profile)
+                extraction_source = "llm"
+            except ProfileExtractionError as exc:
+                extraction_source = "rule_fallback"
+                fallback_reason = str(exc)
+            logger.info(
+                "profile_extraction source=%s extracted_fields=%s fallback_reason=%s duration_ms=%d",
+                extraction_source,
+                sorted(llm_patch),
+                fallback_reason,
+                (perf_counter() - started_at) * 1000,
+            )
+        else:
+            logger.info("profile_extraction source=rule extracted_fields=%s fallback_reason=%s", sorted(rule_patch), None)
+        profile = stored_profile.model_copy(update={**request_values, **rule_patch, **llm_patch})
         state = await self._workflow_agent.run(
             session_id=request.sessionId,
             message=request.message.strip(),
@@ -128,9 +155,11 @@ class ChatService:
         return state
 
     async def chat(self, request: ChatRequest) -> ChatData:
+        request_started_at = perf_counter()
         state = await self._run_workflow(request)
         user_message, messages = await self._messages(request, state)
         reply = self._fallback_reply(state)
+        explanation_started_at = perf_counter()
         if not state.needFollowUp:
             try:
                 generated = await self._provider.complete(messages)
@@ -141,12 +170,19 @@ class ChatService:
         await self._store.append_exchange(
             request.sessionId, request.userId, user_message, reply
         )
+        logger.info(
+            "chat_timing final_explanation_ms=%d total_request_ms=%d",
+            (perf_counter() - explanation_started_at) * 1000,
+            (perf_counter() - request_started_at) * 1000,
+        )
         return self._result(request, state, reply)
 
     async def stream_chat(self, request: ChatRequest) -> AsyncIterator[ChatStreamEvent]:
+        request_started_at = perf_counter()
         state = await self._run_workflow(request)
         user_message, messages = await self._messages(request, state)
         chunks: list[str] = []
+        explanation_started_at = perf_counter()
         if not state.needFollowUp:
             try:
                 async for chunk in self._provider.stream(messages):
@@ -162,5 +198,10 @@ class ChatService:
         reply = "".join(chunks).strip() or self._fallback_reply(state)
         await self._store.append_exchange(
             request.sessionId, request.userId, user_message, reply
+        )
+        logger.info(
+            "chat_timing final_explanation_ms=%d total_request_ms=%d",
+            (perf_counter() - explanation_started_at) * 1000,
+            (perf_counter() - request_started_at) * 1000,
         )
         yield ChatStreamEvent(kind="done", data=self._result(request, state, reply))

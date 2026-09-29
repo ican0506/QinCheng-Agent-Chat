@@ -25,6 +25,7 @@ from app.rag.chunker import MarkdownPolicyChunker
 from app.rag.loader import RagDocumentLoader
 from app.rag.retriever import InMemoryRagRetriever
 from app.services.chat_service import ChatService
+from app.services.llm_profile_extractor import LLMProfileExtractor
 from app.services.llm.base import LLMProvider, UnavailableLLMProvider
 from app.services.llm.openai_compatible import OpenAICompatibleProvider
 from app.stores.session_store import InMemorySessionStore
@@ -90,7 +91,12 @@ def create_app(
     application.state.policy_relation_repository = policy_relation_repository
     application.state.rag_retriever = rag_retriever
     application.state.workflow_agent = workflow_agent
-    application.state.chat_service = ChatService(active_provider, store, workflow_agent)
+    profile_extractor = (
+        LLMProfileExtractor(active_provider)
+        if active_settings.profile_extraction_enabled and active_settings.llm_configured
+        else None
+    )
+    application.state.chat_service = ChatService(active_provider, store, workflow_agent, profile_extractor)
 
     application.add_middleware(
         CORSMiddleware,

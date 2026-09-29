@@ -6,13 +6,13 @@
 
 ## 当前能力
 
-- 用户画像采集与多轮信息补全；
+- 用户画像采用 LLM 结构化信息抽取，并通过 Pydantic/确定性规则进行字段校验和归一化；模型不可用时回退到本地规则解析器；
 - 苏州市高校毕业生就业创业政策检索；
 - 已核验官方政策原文知识库检索与来源追溯；
 - 确定性资格辅助判断：`PASS`、`FAIL`、`UNKNOWN`、`MANUAL_REVIEW`；
 - 确定性政策关系分析与办理路径规划；
 - 官方结构化材料清单与轻量材料准备状态预检；
-- OpenAI-compatible LLM 仅负责语言组织和解释；
+- OpenAI-compatible LLM 仅负责画像信息抽取和语言组织解释；
 - `POST /api/agent/chat` 与 `POST /api/agent/chat/stream`。
 
 ## 当前 Workflow
@@ -42,7 +42,7 @@ Chat API / SSE
 - `PolicyCompareTool`：只读取显式、可追溯的关系配置，不根据名称、主题或人群猜测政策间关系。
 - `PlanTool`：根据资格结果、政策时效、申报窗口、缺失信息、材料和显式关系生成结构化办理步骤。
 - `MaterialCheckTool`：只读取已核验政策记录中的具体材料，并依据用户明确陈述标记材料准备状态；不识别文件、不判断真伪。
-- LLM：只使用结构化 Agent 状态组织最终中文说明。
+- LLM：只负责结构化画像信息抽取和基于 Agent State 的最终中文说明；资格判断仍由 RuleEligibilityTool 完成。
 
 ## 政策数据范围
 
@@ -154,7 +154,7 @@ python -m uvicorn app.main:app --reload
 - 服务地址：`http://127.0.0.1:8000`
 - Swagger：`http://127.0.0.1:8000/docs`
 
-如需真实 LLM 调用，复制 `backend/.env.example` 为 `.env`，并按现有环境变量配置 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`。不要提交 `.env` 或真实 API Key。
+如需真实 LLM 调用，复制 `backend/.env.example` 为 `.env`，并按现有环境变量配置 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`。`PROFILE_EXTRACTION_ENABLED=true` 时启用 LLM 结构化画像抽取并在失败时回退规则解析；设为 `false` 时仅使用规则解析。不要提交 `.env` 或真实 API Key。
 
 ### 前端
 
