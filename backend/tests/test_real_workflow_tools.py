@@ -123,6 +123,20 @@ def test_stream_done_keeps_real_chat_data_contract() -> None:
     assert all(not policy["policyId"].startswith("DEMO-") for policy in data["policies"])
 
 
+def test_chat_and_sse_return_material_results_from_real_policy_records() -> None:
+    client = TestClient(create_app(settings(), RecordingProvider()))
+    request = payload("我想申请一次性创业补贴", {
+        "graduationDate": "2025-06-30", "businessRegistrationMonths": 12,
+    })
+    chat_data = client.post("/api/agent/chat", json=request).json()["data"]
+    assert chat_data["materialResults"]
+    assert all(item["source"] == "POLICY" for item in chat_data["materialResults"])
+    assert all(item["status"] in {"UNKNOWN", "READY", "MISSING", "MANUAL_REVIEW"} for item in chat_data["materialResults"])
+
+    stream_data = parse_sse(client.post("/api/agent/chat/stream", json=request).text)[-1][1]["data"]
+    assert stream_data["materialResults"]
+
+
 def test_production_chat_uses_rag_evidence_for_real_policy_recall() -> None:
     client = TestClient(create_app(settings(), RecordingProvider()))
     response = client.post("/api/agent/chat", json=payload("苏州毕业生创业有什么补贴", {

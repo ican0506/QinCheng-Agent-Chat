@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { PanelRight } from "@lucide/vue";
 import FollowUpBlock from "./FollowUpBlock.vue";
+import MaterialChecklist from "./MaterialChecklist.vue";
 import PlanTimeline from "./PlanTimeline.vue";
 import PolicyResultList from "./PolicyResultList.vue";
 import ProfileSummaryBlock from "./ProfileSummaryBlock.vue";
-import type { ChatData } from "../../types/chat";
+import type { ChatData, MaterialResult } from "../../types/chat";
+import { computed } from "vue";
 
-defineProps<{ data?: ChatData; busy: boolean }>();
-const emit = defineEmits<{ followUp: [question: string] }>();
+const props = defineProps<{ data?: ChatData; busy: boolean }>();
+const emit = defineEmits<{ followUp: [question: string]; materialDeclare: [materialId: string, prepared: boolean] }>();
+const policyNames = computed(() => Object.fromEntries((props.data?.policies ?? []).map((policy) => [policy.policyId, policy.name])));
+function declareMaterial(material: MaterialResult, prepared: boolean): void {
+  emit("materialDeclare", material.materialId, prepared);
+}
 </script>
 
 <template>
@@ -32,6 +38,7 @@ const emit = defineEmits<{ followUp: [question: string] }>();
         <ProfileSummaryBlock :profile="data.userProfile" />
         <FollowUpBlock v-if="data.needFollowUp && data.followUpQuestions.length" :questions="data.followUpQuestions" @select="emit('followUp', $event)" />
         <PolicyResultList :policies="data.policies" :data="data" />
+        <MaterialChecklist :results="data.materialResults" :policy-names="policyNames" :busy="busy" @declare="declareMaterial" />
         <PlanTimeline :plan="data.plan" />
       </template>
     </div>

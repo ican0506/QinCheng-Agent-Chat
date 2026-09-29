@@ -8,6 +8,7 @@ from app.agent.models import EligibilityResult, EligibilityStatus, PolicyCandida
 from app.agent.tools.plan import DeterministicPlanTool
 from app.agent.tools.policy_compare import DeterministicPolicyCompareTool
 from app.models.chat import UserProfile
+from app.models.chat import MaterialCheckResult, MaterialStatus
 from app.policy.relations import PolicyRelationRepository
 from app.policy.repository import PolicyRepository
 
@@ -141,3 +142,14 @@ def test_flexible_employment_pass_creates_apply_path() -> None:
     plan = asyncio.run(plan_tool().build_plan(UserProfile(city="苏州市"), [policy], [eligibility(policy.policyId, EligibilityStatus.PASS)], []))
 
     assert any(step.actionType.value == "APPLY_POLICY" for step in plan.steps)
+
+
+def test_plan_reads_material_status_without_recalculating_it() -> None:
+    policy = candidate("suzhou-startup-one-time-2023")
+    material = MaterialCheckResult(
+        materialId="test:license", policyId=policy.policyId, materialName="营业执照或其他法定注册登记证书",
+        status=MaterialStatus.MISSING, reason="用户明确表示尚未准备该材料。",
+    )
+    plan = asyncio.run(plan_tool().build_plan(UserProfile(city="苏州市"), [policy], [eligibility(policy.policyId, EligibilityStatus.PASS)], [], [material]))
+    step = next(item for item in plan.steps if item.actionType.value == "PREPARE_MATERIALS")
+    assert "尚未准备" in step.description

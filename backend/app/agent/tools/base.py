@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from app.agent.models import EligibilityResult, OverallPlan, PolicyCandidate, PolicyRelation
-from app.models.chat import UserProfile
+from app.models.chat import MaterialCheckResult, UserProfile
 
 
 class PolicySearchTool(Protocol):
@@ -29,4 +29,5 @@ class PlanTool(Protocol):
         policies: list[PolicyCandidate],
         eligibility: list[EligibilityResult],
         relations: list[PolicyRelation],
+        material_results: list[MaterialCheckResult] | None = None,
     ) -> OverallPlan: ...

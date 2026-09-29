@@ -11,6 +11,7 @@
 - 已核验官方政策原文知识库检索与来源追溯；
 - 确定性资格辅助判断：`PASS`、`FAIL`、`UNKNOWN`、`MANUAL_REVIEW`；
 - 确定性政策关系分析与办理路径规划；
+- 官方结构化材料清单与轻量材料准备状态预检；
 - OpenAI-compatible LLM 仅负责语言组织和解释；
 - `POST /api/agent/chat` 与 `POST /api/agent/chat/stream`。
 
@@ -27,6 +28,8 @@ RuleEligibilityTool
     ↓
 PolicyCompareTool
     ↓
+MaterialCheckTool
+    ↓
 PlanTool
     ↓
 LLM Explanation
@@ -38,6 +41,7 @@ Chat API / SSE
 - `RuleEligibilityTool`：唯一负责确定性资格判断，LLM 不决定资格结论。
 - `PolicyCompareTool`：只读取显式、可追溯的关系配置，不根据名称、主题或人群猜测政策间关系。
 - `PlanTool`：根据资格结果、政策时效、申报窗口、缺失信息、材料和显式关系生成结构化办理步骤。
+- `MaterialCheckTool`：只读取已核验政策记录中的具体材料，并依据用户明确陈述标记材料准备状态；不识别文件、不判断真伪。
 - LLM：只使用结构化 Agent 状态组织最终中文说明。
 
 ## 政策数据范围
@@ -181,5 +185,6 @@ npm run build
 - 部分政策条件需要 `MANUAL_REVIEW`；
 - 部分政策的 `applicationStatus` 仍为 `UNKNOWN`；
 - 部分政策的官方材料和流程信息不完整；
+- 当前不支持 OCR、文件上传、材料真伪校验或自动审批；材料完整性取决于已核验的结构化政策记录；
 - 前端 Workspace 由每个会话最近一次 SSE `done.data` 的真实 `ChatData` 驱动，展示后端返回的政策、资格辅助判断、补充问题、办理计划与官方来源；
 - 尚未实现 OCR、文件上传、材料识别、Dify、外部向量数据库和业务数据库持久化。

@@ -101,7 +101,19 @@ export interface OverallPlan {
 }
 
 /** 后端当前仅声明材料结果为对象数组，具体字段尚未公开。 */
-export type MaterialResult = Record<string, never>;
+export type MaterialStatus = "READY" | "MISSING" | "UNKNOWN" | "MANUAL_REVIEW";
+
+export interface MaterialResult {
+  materialId: string;
+  policyId: string;
+  materialName: string;
+  description: string | null;
+  status: MaterialStatus;
+  reason: string;
+  source: "POLICY";
+  userProvided: boolean;
+  needsManualReview: boolean;
+}
 
 export interface ApiResponse<T> {
   code: number;

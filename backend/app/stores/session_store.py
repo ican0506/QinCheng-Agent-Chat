@@ -12,6 +12,7 @@ from app.services.llm.base import LLMMessage
 class SessionRecord:
     user_id: str
     messages: list[LLMMessage] = field(default_factory=list)
+    material_declarations: dict[str, bool] = field(default_factory=dict)
 
 
 class InMemorySessionStore:
@@ -55,3 +56,22 @@ class InMemorySessionStore:
 
             while len(self._sessions) > self._session_limit:
                 self._sessions.popitem(last=False)
+
+    async def get_material_declarations(self, session_id: str, user_id: str) -> dict[str, bool]:
+        async with self._lock:
+            record = self._sessions.get(session_id)
+            if record is None:
+                return {}
+            if record.user_id != user_id:
+                raise InvalidRequestError("sessionId 与 userId 不匹配")
+            return dict(record.material_declarations)
+
+    async def set_material_declarations(self, session_id: str, user_id: str, declarations: dict[str, bool]) -> None:
+        async with self._lock:
+            record = self._sessions.get(session_id)
+            if record is None:
+                record = SessionRecord(user_id=user_id)
+                self._sessions[session_id] = record
+            elif record.user_id != user_id:
+                raise InvalidRequestError("sessionId 与 userId 不匹配")
+            record.material_declarations = dict(declarations)

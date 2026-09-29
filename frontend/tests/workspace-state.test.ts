@@ -1,5 +1,6 @@
 import { getEligibilityByPolicyId, profileDisplayItems, safeSourceUrl } from "../src/workspace/selectors.js";
 import { saveLatestChatData } from "../src/workspace/sessionState.js";
+import { materialDeclarationMessage, materialStatusLabels } from "../src/workspace/materials.js";
 import type { ChatData } from "../src/types/chat.js";
 import type { ChatSession } from "../src/types/agent.js";
 
@@ -29,3 +30,7 @@ assert(safeSourceUrl(result.policies[0].sourceUrl) !== null, "官方来源链接
 assert(safeSourceUrl("javascript:alert(1)") === null, "非 HTTP 来源链接必须隐藏");
 assert(result.plan?.steps[0]?.status === "BLOCKED", "计划步骤必须保留后端原有顺序和状态");
 assert({ ...result, policies: [], eligibility: [], plan: null }.plan === null, "空数据不得回退为模拟数据");
+const material = { materialId: "policy-a:material", policyId: "policy-a", materialName: "营业执照", description: null, status: "UNKNOWN" as const, reason: "待确认", source: "POLICY" as const, userProvided: false, needsManualReview: false };
+assert(materialStatusLabels.READY === "已准备" && materialStatusLabels.MANUAL_REVIEW === "需人工核验", "材料状态应使用固定中文映射");
+assert(materialDeclarationMessage(material, true) === "我已经准备好营业执照", "材料操作必须生成发送给后端的自然语言声明");
+assert(result.materialResults.length === 0, "空材料结果不得在前端伪造材料");

@@ -4,7 +4,7 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-from app.models.chat import UserProfile
+from app.models.chat import MaterialCheckResult, UserProfile
 
 
 class AgentStage(str, Enum):
@@ -115,6 +115,8 @@ class GovernmentAgentState(BaseModel):
     eligibilityResults: list[EligibilityResult] = Field(default_factory=list)
     policyRelations: list[PolicyRelation] = Field(default_factory=list)
     overallPlan: OverallPlan | None = None
+    materialResults: list[MaterialCheckResult] = Field(default_factory=list)
+    materialDeclarations: dict[str, bool] = Field(default_factory=dict)
     needFollowUp: bool = False
     followUpQuestions: list[str] = Field(default_factory=list)
     nextAction: str | None = None
