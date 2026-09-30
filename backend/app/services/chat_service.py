@@ -145,11 +145,22 @@ class ChatService:
             )
         else:
             logger.info("profile_extraction source=rule extracted_fields=%s fallback_reason=%s", sorted(rule_patch), None)
-        deterministic_patch = ProfileUpdateParser.deterministic_overrides(
+        graduation_date_patch = ProfileUpdateParser.graduation_date_overrides(request.message)
+        relative_time_patch = ProfileUpdateParser.relative_time_overrides(
             request.message, current_date=self._current_date
         )
+        deterministic_intent_patch = ProfileUpdateParser.deterministic_intent_overrides(
+            request.message
+        )
         profile = stored_profile.model_copy(
-            update={**request_values, **rule_patch, **llm_patch, **deterministic_patch}
+            update={
+                **request_values,
+                **rule_patch,
+                **llm_patch,
+                **graduation_date_patch,
+                **relative_time_patch,
+                **deterministic_intent_patch,
+            }
         )
         state = await self._workflow_agent.run(
             session_id=request.sessionId,

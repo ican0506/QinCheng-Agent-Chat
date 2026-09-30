@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, StrictBool, field_validator
 
 from app.models.chat import UserProfile
 from app.services.llm.base import LLMMessage, LLMProvider
+from app.services.profile_update_parser import ProfileUpdateParser
 
 
 PROFILE_EXTRACTION_SYSTEM_PROMPT = """你是用户画像信息抽取器，只从当前用户消息提取明确新增或修改的画像字段。
@@ -123,7 +124,7 @@ class ProfilePatchValidator:
 
     @staticmethod
     def _message_has_exact_graduation_date(message: str) -> bool:
-        return bool(re.search(r"20\d{2}年\d{1,2}月\d{1,2}日(?:毕业|应届)?", message))
+        return bool(ProfileUpdateParser.graduation_date_overrides(message))
 
 
 class LLMProfileExtractor:
