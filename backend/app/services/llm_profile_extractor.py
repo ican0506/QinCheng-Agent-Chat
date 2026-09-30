@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import asyncio
 from datetime import date
 from typing import Any
 
@@ -128,8 +129,9 @@ class ProfilePatchValidator:
 class LLMProfileExtractor:
     """复用现有 Provider 的单次 JSON 调用，抽取当前消息的画像 patch。"""
 
-    def __init__(self, provider: LLMProvider) -> None:
+    def __init__(self, provider: LLMProvider, timeout_seconds: float = 5) -> None:
         self._provider = provider
+        self._timeout_seconds = timeout_seconds
 
     async def extract(self, message: str, current_profile: UserProfile) -> dict[str, object]:
         context = current_profile.model_dump(mode="json", exclude_none=True)
@@ -141,7 +143,11 @@ class LLMProfileExtractor:
             }, ensure_ascii=False, separators=(",", ":"))},
         ]
         try:
-            content = await self._provider.complete(messages)
+            content = await asyncio.wait_for(
+                self._provider.complete(messages), timeout=self._timeout_seconds
+            )
+        except TimeoutError as exc:
+            raise ProfileExtractionError("timeout") from exc
         except Exception as exc:
             raise ProfileExtractionError("provider_exception") from exc
         return ProfilePatchValidator.validate(content, message)

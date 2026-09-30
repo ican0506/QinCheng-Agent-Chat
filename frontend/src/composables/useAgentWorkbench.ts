@@ -1,7 +1,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { ChatApiError, streamChatMessage } from "../services/chatApi";
 import type { ChatData } from "../types/chat";
-import { saveLatestChatData } from "../workspace/sessionState";
+import { prependNewSession, saveLatestChatData } from "../workspace/sessionState";
 import type {
   ChatMessage,
   ChatSession,
@@ -111,7 +111,7 @@ export function useAgentWorkbench() {
   function newSession(): void {
     controller?.abort();
     const session = createSession();
-    sessions.value.unshift(session);
+    sessions.value = prependNewSession(sessions.value, session);
     activeSessionId.value = session.sessionId;
     draft.value = "";
     busy.value = false;

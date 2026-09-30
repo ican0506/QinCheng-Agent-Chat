@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import date
 import json
 import logging
 from time import perf_counter
@@ -37,11 +38,12 @@ class ChatStreamEvent:
 
 
 class ChatService:
-    def __init__(self, provider: LLMProvider, store: InMemorySessionStore, workflow_agent: WorkflowAgent, profile_extractor: LLMProfileExtractor | None = None) -> None:
+    def __init__(self, provider: LLMProvider, store: InMemorySessionStore, workflow_agent: WorkflowAgent, profile_extractor: LLMProfileExtractor | None = None, current_date: date | None = None) -> None:
         self._provider = provider
         self._store = store
         self._workflow_agent = workflow_agent
         self._profile_extractor = profile_extractor
+        self._current_date = current_date
 
     async def _messages(
         self, request: ChatRequest, state: GovernmentAgentState
@@ -122,7 +124,7 @@ class ChatService:
             for name in request.userProfile.__class__.model_fields
             if getattr(request.userProfile, name) is not None
         }
-        rule_patch = ProfileUpdateParser.parse(request.message)
+        rule_patch = ProfileUpdateParser.parse(request.message, current_date=self._current_date)
         llm_patch: dict[str, object] = {}
         extraction_source = "rule"
         fallback_reason: str | None = None
@@ -143,7 +145,12 @@ class ChatService:
             )
         else:
             logger.info("profile_extraction source=rule extracted_fields=%s fallback_reason=%s", sorted(rule_patch), None)
-        profile = stored_profile.model_copy(update={**request_values, **rule_patch, **llm_patch})
+        deterministic_patch = ProfileUpdateParser.deterministic_overrides(
+            request.message, current_date=self._current_date
+        )
+        profile = stored_profile.model_copy(
+            update={**request_values, **rule_patch, **llm_patch, **deterministic_patch}
+        )
         state = await self._workflow_agent.run(
             session_id=request.sessionId,
             message=request.message.strip(),

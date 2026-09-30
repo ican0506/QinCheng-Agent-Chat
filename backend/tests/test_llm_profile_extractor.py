@@ -48,6 +48,16 @@ class RoutedStructuredProvider(LLMProvider):
         return "已基于结构化 Agent 结果生成说明。"
 
 
+class SlowExtractionProvider(LLMProvider):
+    @property
+    def name(self) -> str:
+        return "slow-extraction-test-provider"
+
+    async def complete(self, messages: list[LLMMessage]) -> str:
+        await asyncio.sleep(0.05)
+        return "{}"
+
+
 def extract(message: str, response: dict[str, object], profile: UserProfile | None = None) -> dict[str, object]:
     provider = StructuredProvider(json.dumps(response, ensure_ascii=False))
     return asyncio.run(LLMProfileExtractor(provider).extract(message, profile or UserProfile()))
@@ -169,6 +179,15 @@ def test_provider_exception_falls_back_to_rule_patch() -> None:
     assert state.userProfile.model_dump(exclude_none=True) == {
         "city": "苏州市", "education": "本科", "graduationYear": 2025, "fields": [],
     }
+
+
+def test_extractor_uses_its_own_short_timeout() -> None:
+    async def scenario() -> None:
+        extractor = LLMProfileExtractor(SlowExtractionProvider(), timeout_seconds=0.001)
+        with pytest.raises(ProfileExtractionError, match="timeout"):
+            await extractor.extract("我在苏州", UserProfile())
+
+    asyncio.run(scenario())
 
 
 def test_enabled_extractor_keeps_rule_fields_and_accumulates_four_turns() -> None:

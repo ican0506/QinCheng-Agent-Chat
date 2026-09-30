@@ -200,6 +200,93 @@ def test_latest_non_entrepreneurial_intent_removes_startup_candidates_and_plan_s
     assert "经营主体" not in fourth["replyText"]
 
 
+def test_browser_wording_for_non_entrepreneurial_job_seeking_removes_startup_candidates() -> None:
+    client = TestClient(create_app(settings(), FailingProvider()))
+    session_id = "browser-intent-wording"
+    request = lambda message: {
+        "sessionId": session_id,
+        "userId": "browser-intent-user",
+        "message": message,
+        "userProfile": {},
+    }
+
+    client.post("/api/agent/chat", json=request("我在苏州，本科，2025年毕业，目前未就业"))
+    client.post("/api/agent/chat", json=request("我准备创业"))
+    response = client.post(
+        "/api/agent/chat",
+        json=request("我不是要创业，我就是想找个工作"),
+    ).json()["data"]
+    profile = asyncio.run(
+        client.app.state.chat_service._store.get_internal_profile(session_id, "browser-intent-user")
+    )
+
+    excluded_ids = {"suzhou-startup-one-time-2023", "suzhou-startup-social-2021"}
+    assert profile.entrepreneurshipIntent is False
+    assert profile.jobSeekingIntent is True
+    assert {item["policyId"] for item in response["policies"]}.isdisjoint(excluded_ids)
+    assert not any("经营主体" in question for question in response["followUpQuestions"])
+
+
+def test_material_declaration_round_trip_returns_ready_and_persists_per_session() -> None:
+    client = TestClient(create_app(settings(), FailingProvider()))
+    session_id = "material-declaration-round-trip"
+    user_id = "material-declaration-user"
+    profile = {
+        "city": "苏州市",
+        "education": "本科",
+        "graduationYear": 2025,
+        "employmentStatus": "创业中",
+        "socialInsuranceMonths": 12,
+        "businessRegistrationMonths": 12,
+    }
+    first = client.post(
+        "/api/agent/chat",
+        json={
+            "sessionId": session_id,
+            "userId": user_id,
+            "message": "我想申请创业社会保险补贴",
+            "userProfile": profile,
+        },
+    ).json()["data"]
+    assert any(item["materialName"] == "《苏州市创业社会保险补贴申请表》" for item in first["materialResults"])
+
+    declared = client.post(
+        "/api/agent/chat",
+        json={
+            "sessionId": session_id,
+            "userId": user_id,
+            "message": "我已经准备好《苏州市创业社会保险补贴申请表》",
+            "userProfile": {},
+        },
+    ).json()["data"]
+    ready = next(item for item in declared["materialResults"] if item["materialName"] == "《苏州市创业社会保险补贴申请表》")
+    assert ready["status"] == "READY"
+
+    persisted = client.post(
+        "/api/agent/chat",
+        json={
+            "sessionId": session_id,
+            "userId": user_id,
+            "message": "继续查询创业社会保险补贴",
+            "userProfile": {},
+        },
+    ).json()["data"]
+    restored = next(item for item in persisted["materialResults"] if item["materialId"] == ready["materialId"])
+    assert restored["status"] == "READY"
+
+    isolated = client.post(
+        "/api/agent/chat",
+        json={
+            "sessionId": "material-declaration-other-session",
+            "userId": user_id,
+            "message": "我想申请创业社会保险补贴",
+            "userProfile": profile,
+        },
+    ).json()["data"]
+    other = next(item for item in isolated["materialResults"] if item["materialName"] == ready["materialName"])
+    assert other["status"] == "UNKNOWN"
+
+
 def test_new_entrepreneurial_session_does_not_inherit_another_sessions_profile() -> None:
     client = TestClient(create_app(settings(), FailingProvider()))
     client.post(

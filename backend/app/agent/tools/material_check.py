@@ -13,7 +13,7 @@ class MaterialCheckTool:
 
     _non_concrete_markers = ("以经办渠道", "以最新", "当前要求为准", "具体材料")
     _missing_markers = ("还没有", "没准备", "没有", "未准备")
-    _ready_markers = ("准备好了", "已准备", "有了", "我有", "已有")
+    _ready_markers = ("已经准备好", "准备好了", "准备好", "已准备", "有了", "我有", "已有")
 
     def __init__(self, repository: PolicyRepository) -> None:
         self._repository = repository
@@ -49,15 +49,22 @@ class MaterialCheckTool:
         return bool(cleaned) and not any(marker in cleaned for marker in cls._non_concrete_markers)
 
     @staticmethod
-    def material_id(policy_id: str, material_name: str) -> str:
-        normalized = re.sub(r"\s+", "", material_name).lower()
+    def normalize_material_name(material_name: str) -> str:
+        return re.sub(r"[\s《》〈〉“”‘’\"']+", "", material_name).lower()
+
+    @classmethod
+    def material_id(cls, policy_id: str, material_name: str) -> str:
+        normalized = cls.normalize_material_name(material_name)
         digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
         return f"{policy_id}:{digest}"
 
     @classmethod
     def _statement_for(cls, message: str, material_name: str) -> bool | None:
-        compact_message = re.sub(r"\s+", "", message)
-        aliases = {material_name, material_name.replace("证书", "证"), material_name.split("或", 1)[0]}
+        compact_message = cls.normalize_material_name(message)
+        aliases = {
+            cls.normalize_material_name(alias)
+            for alias in (material_name, material_name.replace("证书", "证"), material_name.split("或", 1)[0])
+        }
         if not any(alias and alias in compact_message for alias in aliases):
             return None
         if any(marker in compact_message for marker in cls._missing_markers):
