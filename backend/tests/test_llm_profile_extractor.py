@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import date
 
 import pytest
 
@@ -179,6 +180,34 @@ def test_provider_exception_falls_back_to_rule_patch() -> None:
     assert state.userProfile.model_dump(exclude_none=True) == {
         "city": "苏州市", "education": "本科", "graduationYear": 2025, "fields": [],
     }
+
+
+@pytest.mark.parametrize("extractor", [
+    None,
+    LLMProfileExtractor(StructuredProvider(RuntimeError("provider unavailable"))),
+    LLMProfileExtractor(SlowExtractionProvider(), timeout_seconds=0.001),
+])
+def test_exact_date_and_unemployment_are_deterministic_when_llm_is_unavailable(extractor) -> None:
+    store = InMemorySessionStore()
+    service = ChatService(
+        StructuredProvider("{}"),
+        store,
+        WorkflowAgent.default(),
+        profile_extractor=extractor,
+        current_date=date(2026, 9, 30),
+    )
+
+    state = asyncio.run(service._run_workflow(ChatRequest(
+        sessionId="deterministic-date-fallback",
+        userId="user",
+        message="我去年本科毕业，目前待业，我在苏州，具体毕业日期是2025-06-20",
+        userProfile=UserProfile(),
+    )))
+
+    assert state.userProfile.graduationYear == 2025
+    assert state.userProfile.graduationDate == date(2025, 6, 20)
+    assert state.userProfile.employmentStatus == "待就业"
+    assert state.userProfile.unemploymentStatus == "未就业"
 
 
 def test_extractor_uses_its_own_short_timeout() -> None:

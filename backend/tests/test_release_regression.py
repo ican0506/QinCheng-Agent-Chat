@@ -316,3 +316,60 @@ def test_new_entrepreneurial_session_does_not_inherit_another_sessions_profile()
     assert profile.education is None
     assert profile.graduationYear is None
     assert profile.socialInsuranceMonths is None
+
+
+def test_explicit_graduation_date_reaches_session_and_profile_node_without_llm() -> None:
+    client = TestClient(create_app(settings(), FailingProvider()))
+    session_id = "explicit-graduation-date-session"
+    user_id = "explicit-graduation-date-user"
+
+    response = client.post(
+        "/api/agent/chat",
+        json={
+            "sessionId": session_id,
+            "userId": user_id,
+            "message": "我的毕业日期是2025-06-20，毕业年份是2025",
+            "userProfile": {
+                "city": "苏州市",
+                "education": "本科",
+                "employmentStatus": "创业中",
+            },
+        },
+    ).json()["data"]
+    profile = asyncio.run(
+        client.app.state.chat_service._store.get_internal_profile(session_id, user_id)
+    )
+
+    assert profile.graduationYear == 2025
+    assert profile.graduationDate.isoformat() == "2025-06-20"
+    assert not any("毕业年份" in question or "毕业日期" in question for question in response["followUpQuestions"])
+
+
+def test_exact_date_correction_overrides_historical_graduation_year() -> None:
+    client = TestClient(create_app(settings(), FailingProvider()))
+    session_id = "graduation-date-correction-session"
+    user_id = "graduation-date-correction-user"
+    request = lambda message, profile=None: {
+        "sessionId": session_id,
+        "userId": user_id,
+        "message": message,
+        "userProfile": profile or {},
+    }
+
+    client.post(
+        "/api/agent/chat",
+        json=request(
+            "我在苏州，本科，2024年毕业，目前创业中",
+            {"graduationYear": 2024},
+        ),
+    )
+    client.post(
+        "/api/agent/chat",
+        json=request("之前说错了，我的毕业日期其实是2025-06-20"),
+    )
+    profile = asyncio.run(
+        client.app.state.chat_service._store.get_internal_profile(session_id, user_id)
+    )
+
+    assert profile.graduationYear == 2025
+    assert profile.graduationDate.isoformat() == "2025-06-20"
