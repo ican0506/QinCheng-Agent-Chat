@@ -18,6 +18,7 @@ class Settings:
     session_history_limit: int
     session_limit: int
     profile_extraction_enabled: bool = False
+    profile_extraction_timeout_seconds: float = 5
 
     @property
     def llm_configured(self) -> bool:
@@ -46,4 +47,5 @@ class Settings:
             session_history_limit=int(os.getenv("SESSION_HISTORY_LIMIT", "40")),
             session_limit=int(os.getenv("SESSION_LIMIT", "1000")),
             profile_extraction_enabled=os.getenv("PROFILE_EXTRACTION_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
+            profile_extraction_timeout_seconds=float(os.getenv("PROFILE_EXTRACTION_TIMEOUT_SECONDS", "5")),
         )

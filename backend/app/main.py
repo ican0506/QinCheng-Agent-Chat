@@ -92,7 +92,7 @@ def create_app(
     application.state.rag_retriever = rag_retriever
     application.state.workflow_agent = workflow_agent
     profile_extractor = (
-        LLMProfileExtractor(active_provider)
+        LLMProfileExtractor(active_provider, active_settings.profile_extraction_timeout_seconds)
         if active_settings.profile_extraction_enabled and active_settings.llm_configured
         else None
     )

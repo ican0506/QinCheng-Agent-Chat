@@ -37,6 +37,16 @@ def test_concrete_materials_default_to_unknown_and_declarations_update_status() 
     assert next(item for item in missing if "毕业证" in item.materialName).status.value == "MISSING"
 
 
+def test_material_declaration_with_brackets_and_alternate_ready_wording_updates_status() -> None:
+    policy = candidate("suzhou-startup-social-2021")
+
+    results, declarations = check("我已经准备好《苏州市创业社会保险补贴申请表》", [policy])
+
+    application = next(item for item in results if item.materialName == "《苏州市创业社会保险补贴申请表》")
+    assert application.status.value == "READY"
+    assert declarations[application.materialId] is True
+
+
 def test_manual_review_placeholder_and_policy_scoping() -> None:
     policy = candidate("suzhou-job-seeking-subsidy-2026")
     results, _ = check("我想申领", [policy])

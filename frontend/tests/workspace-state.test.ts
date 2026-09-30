@@ -1,5 +1,5 @@
 import { getEligibilityByPolicyId, isPolicyMaterialReferenceOnly, profileDisplayItems, safeSourceUrl } from "../src/workspace/selectors.js";
-import { saveLatestChatData } from "../src/workspace/sessionState.js";
+import { prependNewSession, saveLatestChatData } from "../src/workspace/sessionState.js";
 import { materialDeclarationMessage, materialStatusLabels } from "../src/workspace/materials.js";
 import type { ChatData } from "../src/types/chat.js";
 import type { ChatSession } from "../src/types/agent.js";
@@ -43,3 +43,11 @@ const historicalClosed: ChatData = {
   }],
 };
 assert(isPolicyMaterialReferenceOnly(historicalClosed, "policy-a"), "历史或已关闭政策的材料必须降级为只读参考");
+
+const newSession = { sessionId: "session-new", title: "新对话", messages: [] };
+const sessionsAfterCreate = prependNewSession([sessionA, sessionB], newSession);
+assert(sessionsAfterCreate.length === 3, "新建任务应增加一个会话");
+assert(sessionsAfterCreate[0]?.sessionId === "session-new", "新建任务应立即切换到新会话");
+assert(sessionsAfterCreate[0]?.messages.length === 0, "新会话不得继承历史消息");
+assert(sessionsAfterCreate[0]?.latestChatData === undefined, "新会话工作台必须为空");
+assert(sessionA.latestChatData === result, "新建任务不得清空原会话工作台结果");
