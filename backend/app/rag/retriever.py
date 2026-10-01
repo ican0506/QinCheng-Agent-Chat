@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from collections import Counter
 from math import log, sqrt
-from typing import Iterable
-
 from app.rag.models import RagChunk, RagSearchHit
 
 
@@ -53,7 +51,7 @@ class InMemoryRagRetriever:
         query_terms = self._term_frequency(query)
         if not query_terms:
             return []
-        ranked: list[tuple[float, RagSearchHit]] = []
+        ranked: list[tuple[int, float, RagSearchHit]] = []
         for chunk, terms in self.metadata_filter(
             region=region,
             topic=topic,
@@ -77,17 +75,20 @@ class InMemoryRagRetriever:
                 score=round(score, 4),
                 heading=chunk.heading,
             )
-            ranked.append((score + self._validity_adjustment(chunk.validityStatus, include_historical), hit))
-        ranked.sort(key=lambda item: (-item[0], item[1].policyId, item[1].chunkId))
-        return [hit for _, hit in ranked[:top_k]]
+            ranked.append((self.temporal_rank(chunk.validityStatus, chunk.applicationStatus, include_historical), score, hit))
+        ranked.sort(key=lambda item: (item[0], -item[1], item[2].policyId, item[2].chunkId))
+        return [hit for _, _, hit in ranked[:top_k]]
 
     @staticmethod
-    def _validity_adjustment(validity_status: str, include_historical: bool) -> float:
+    def temporal_rank(validity_status: str, application_status: str, include_historical: bool) -> int:
+        reference = validity_status in {"HISTORICAL", "EXPIRED"} or application_status == "CLOSED"
+        if include_historical:
+            return 0 if reference else 1
+        if reference:
+            return 2
         if validity_status == "ACTIVE":
-            return 0.02
-        if validity_status in {"HISTORICAL", "EXPIRED"}:
-            return 0.02 if include_historical else -0.02
-        return 0.0
+            return 0
+        return 1
 
     @staticmethod
     def _searchable_text(chunk: RagChunk) -> str:

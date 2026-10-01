@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 from app.agent.models import PolicyCandidate
 from app.agent.tools.local_policy import LocalPolicySearchTool
 from app.agent.tools.policy_intent import allowed_policy_ids
@@ -9,6 +7,7 @@ from app.models.chat import UserProfile
 from app.policy.repository import PolicyRepository
 from app.rag.models import RagSearchHit
 from app.rag.retriever import InMemoryRagRetriever
+from app.services.policy_query_context import QueryTemporalIntent, QueryTemporalIntentDetector
 
 
 class RagPolicySearchTool:
@@ -75,7 +74,7 @@ class RagPolicySearchTool:
 
     @staticmethod
     def _asks_for_historical_record(message: str) -> bool:
-        return bool(re.search(r"历史|往年|20\d{2}|\d{4}届", message))
+        return QueryTemporalIntentDetector.detect(message) is QueryTemporalIntent.HISTORICAL
 
     def _candidates_from_hits(self, hits: list[RagSearchHit]) -> list[PolicyCandidate]:
         candidates: list[PolicyCandidate] = []

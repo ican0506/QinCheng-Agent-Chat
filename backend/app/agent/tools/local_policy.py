@@ -4,6 +4,8 @@ from app.agent.models import PolicyCandidate
 from app.agent.tools.policy_intent import allows_policy_for_intent
 from app.models.chat import UserProfile
 from app.policy.repository import PolicyRepository
+from app.rag.retriever import InMemoryRagRetriever
+from app.services.policy_query_context import QueryTemporalIntent, QueryTemporalIntentDetector
 
 
 class LocalPolicySearchTool:
@@ -54,6 +56,8 @@ class LocalPolicySearchTool:
         if not records and target_group is not None:
             records = self._repository.filter(region=region, topic=topic)
         records = [record for record in records if allows_policy_for_intent(profile, record)]
+        historical = QueryTemporalIntentDetector.detect(message) is QueryTemporalIntent.HISTORICAL
+        records.sort(key=lambda record: (InMemoryRagRetriever.temporal_rank(record.validityStatus.value, record.applicationStatus.value, historical), record.policyId))
         return [
             PolicyCandidate(
                 policyId=record.policyId,

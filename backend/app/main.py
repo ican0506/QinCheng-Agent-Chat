@@ -106,7 +106,7 @@ def create_app(
         if active_settings.profile_extraction_enabled and active_settings.llm_configured
         else None
     )
-    application.state.chat_service = ChatService(active_provider, store, workflow_agent, profile_extractor)
+    application.state.chat_service = ChatService(active_provider, store, workflow_agent, profile_extractor, policy_repository=policy_repository)
 
     application.add_middleware(
         CORSMiddleware,

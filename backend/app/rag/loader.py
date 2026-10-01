@@ -29,5 +29,6 @@ class RagDocumentLoader:
                 topics=tuple(record.topics),
                 targetGroups=tuple(record.targetGroups),
                 markdown=markdown,
+                applicationStatus=record.applicationStatus.value,
             ))
         return documents

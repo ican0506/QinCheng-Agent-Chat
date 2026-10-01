@@ -52,8 +52,7 @@ class ProfileUpdateParser:
             result["employmentStatus"] = "已就业"
 
         result.update(ProfileUpdateParser.deterministic_intent_overrides(message))
-        if "灵活就业参保" in message or "灵活就业缴社保" in message:
-            result["flexibleEmploymentInsurance"] = True
+        result.update(ProfileUpdateParser.flexible_insurance_overrides(message))
         return result
 
     @staticmethod
@@ -62,6 +61,7 @@ class ProfileUpdateParser:
         return {
             **ProfileUpdateParser.relative_time_overrides(message, current_date),
             **ProfileUpdateParser.deterministic_intent_overrides(message),
+            **ProfileUpdateParser.flexible_insurance_overrides(message),
         }
 
     @staticmethod
@@ -104,10 +104,26 @@ class ProfileUpdateParser:
     def deterministic_intent_overrides(message: str) -> dict[str, object]:
         """仅返回本轮明确表达的求职或创业意图。"""
         result: dict[str, object] = {}
-        if any(phrase in message for phrase in ("我不创业", "不是要创业", "不考虑创业", "暂时不考虑创业", "暂时不创业")):
+        job_only = bool(re.search(r"(?:只(?:是)?(?:打算|想)|就是想|准备)找(?:个)?(?:工作|单位就业)", message))
+        negative = bool(re.search(
+            r"(?:不(?:是(?:要)?|考虑)?创业)(?!补贴|政策|项目|贷款|相关)|没有创业打算", message
+        ))
+        if negative or job_only:
             result["entrepreneurshipIntent"] = False
         elif any(phrase in message for phrase in ("准备创业", "想自己开公司", "打算创业", "我想创业")):
             result["entrepreneurshipIntent"] = True
-        if any(phrase in message for phrase in ("只想找工作", "打算找工作", "准备找单位就业", "只打算找工作", "想找个工作")):
+        if job_only or any(phrase in message for phrase in ("打算找工作", "准备找单位就业", "想找个工作")):
             result["jobSeekingIntent"] = True
         return result
+
+    @staticmethod
+    def flexible_insurance_overrides(message: str) -> dict[str, object]:
+        """只记录参保陈述，不把政策问题当成已参保事实。"""
+        for clause in re.split(r"[，,。；;！!？?]", message):
+            if re.search(r"(?:没有|未|不)(?:按|以)?灵活就业(?:身份)?(?:参保|交社保|缴社保)", clause):
+                return {"flexibleEmploymentInsurance": False}
+            if re.search(r"什么|是否|怎么|如何|能否|能申请|可以|吗", clause):
+                continue
+            if re.search(r"灵活就业(?:身份)?(?:参保|交社保|缴社保)", clause):
+                return {"flexibleEmploymentInsurance": True}
+        return {}
