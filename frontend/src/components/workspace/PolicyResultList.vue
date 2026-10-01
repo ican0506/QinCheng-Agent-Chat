@@ -3,6 +3,7 @@ import { BookOpenCheck, ExternalLink } from "@lucide/vue";
 import { getEligibilityByPolicyId, safeSourceUrl } from "../../workspace/selectors";
 import type { ChatData, PolicyCandidate } from "../../types/chat";
 import { eligibilityStatusLabels as statusLabels } from "../../workspace/statuses";
+import { formatWorkspaceText } from "../../workspace/display";
 
 defineProps<{ policies: PolicyCandidate[]; data: ChatData }>();
 </script>
@@ -17,7 +18,7 @@ defineProps<{ policies: PolicyCandidate[]; data: ChatData }>();
         <span v-if="getEligibilityByPolicyId(data, policy.policyId)" :class="`policy-status policy-status--${getEligibilityByPolicyId(data, policy.policyId)?.overallStatus.toLowerCase()}`">{{ statusLabels[getEligibilityByPolicyId(data, policy.policyId)!.overallStatus] }}</span>
       </div>
       <p>{{ policy.summary }}</p>
-      <p v-if="policy.matchReason" class="match-reason">匹配依据：{{ policy.matchReason }}</p>
+      <p v-if="policy.matchReason" class="match-reason">匹配依据：{{ formatWorkspaceText(policy.matchReason) }}</p>
       <dl class="policy-meta">
         <div><dt>地区</dt><dd>{{ policy.region }}</dd></div>
         <div><dt>主管部门</dt><dd>{{ policy.department }}</dd></div>
@@ -26,12 +27,12 @@ defineProps<{ policies: PolicyCandidate[]; data: ChatData }>();
       </dl>
       <div v-if="getEligibilityByPolicyId(data, policy.policyId)" class="eligibility-detail">
         <strong>资格辅助判断：{{ statusLabels[getEligibilityByPolicyId(data, policy.policyId)!.overallStatus] }}</strong>
-        <p>{{ getEligibilityByPolicyId(data, policy.policyId)!.summary }}</p>
+        <p>{{ formatWorkspaceText(getEligibilityByPolicyId(data, policy.policyId)!.summary) }}</p>
         <ul v-if="getEligibilityByPolicyId(data, policy.policyId)!.conditionResults.length">
           <li v-for="condition in getEligibilityByPolicyId(data, policy.policyId)!.conditionResults" :key="condition.conditionId">
-            <b>{{ condition.description }}</b>：{{ statusLabels[condition.status] }}<span v-if="condition.reason">，{{ condition.reason }}</span>
-            <small v-if="condition.userEvidence">用户信息：{{ condition.userEvidence }}</small>
-            <small v-if="condition.policyEvidence">政策依据：{{ condition.policyEvidence }}</small>
+            <b>{{ formatWorkspaceText(condition.description) }}</b>：{{ statusLabels[condition.status] }}<span v-if="condition.reason">，{{ formatWorkspaceText(condition.reason) }}</span>
+            <small v-if="condition.userEvidence">用户信息：{{ formatWorkspaceText(condition.userEvidence) }}</small>
+            <small v-if="condition.policyEvidence">政策依据：{{ formatWorkspaceText(condition.policyEvidence) }}</small>
           </li>
         </ul>
       </div>

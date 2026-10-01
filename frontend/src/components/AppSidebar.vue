@@ -35,7 +35,7 @@ const emit = defineEmits<{
     </button>
 
     <div class="history-section">
-      <p class="sidebar-label">正在处理</p>
+      <p class="sidebar-label">最近任务</p>
       <button
         v-for="session in sessions"
         :key="session.sessionId"
