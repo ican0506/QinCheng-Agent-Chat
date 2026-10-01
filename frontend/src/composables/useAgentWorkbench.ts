@@ -2,6 +2,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { ChatApiError, streamChatMessage } from "../services/chatApi";
 import type { ChatData } from "../types/chat";
 import { prependNewSession, saveLatestChatData } from "../workspace/sessionState";
+import { readActiveSessionId, persistActiveSessionId } from "../workspace/activeSession";
 import type {
   ChatMessage,
   ChatSession,
@@ -216,10 +217,12 @@ export function useAgentWorkbench() {
     { deep: true },
   );
 
+  watch(activeSessionId, (value) => persistActiveSessionId(localStorage, value), { flush: "sync" });
+
   onMounted(() => {
     sessions.value = restoreSessions();
     if (sessions.value.length === 0) newSession();
-    else activeSessionId.value = sessions.value[0].sessionId;
+    else activeSessionId.value = readActiveSessionId(localStorage, sessions.value);
   });
 
   return {

@@ -1,6 +1,8 @@
 import { getEligibilityByPolicyId, isPolicyMaterialReferenceOnly, profileDisplayItems, safeSourceUrl } from "../src/workspace/selectors.js";
 import { prependNewSession, saveLatestChatData } from "../src/workspace/sessionState.js";
-import { materialDeclarationMessage, materialStatusLabels } from "../src/workspace/materials.js";
+import { materialDeclarationMessage, materialStatusLabels, materialActions } from "../src/workspace/materials.js";
+import { formatWorkspaceText, missingFieldLabel } from "../src/workspace/display.js";
+import { readActiveSessionId, persistActiveSessionId } from "../src/workspace/activeSession.js";
 import type { ChatData } from "../src/types/chat.js";
 import type { ChatSession } from "../src/types/agent.js";
 
@@ -51,3 +53,32 @@ assert(sessionsAfterCreate[0]?.sessionId === "session-new", "新建任务应立�
 assert(sessionsAfterCreate[0]?.messages.length === 0, "新会话不得继承历史消息");
 assert(sessionsAfterCreate[0]?.latestChatData === undefined, "新会话工作台必须为空");
 assert(sessionA.latestChatData === result, "新建任务不得清空原会话工作台结果");
+
+assert(materialActions("UNKNOWN", false).join() === "true,false", "待确认材料提供两个操作");
+assert(materialActions("READY", false).length === 0, "已准备材料不显示重复操作");
+assert(materialActions("MISSING", false).join() === "true", "未准备材料只允许声明已准备");
+assert(materialActions("MANUAL_REVIEW", false).length === 0, "人工核验材料无声明操作");
+for (const status of ["UNKNOWN", "READY", "MISSING", "MANUAL_REVIEW"] as const) {
+  assert(materialActions(status, true).length === 0, "历史材料任意状态都只读");
+}
+assert(formatWorkspaceText("政策有效性：ACTIVE；HISTORICAL；CLOSED") === "政策有效性：当前有效；历史政策；申报已结束", "枚举中文化");
+assert(missingFieldLabel("residencyRegistration") === "户籍情况", "缺失字段中文化");
+assert(missingFieldLabel("futureInternalField") === "需补充相关信息", "未知字段安全隐藏");
+assert(formatWorkspaceText("缺少字段：flexibleEmploymentInsurance") === "缺少字段：是否已按灵活就业身份参保缴费", "原因里的字段也中文化");
+assert(formatWorkspaceText("缺少字段：futureInternalField") === "缺少字段：需补充相关信息", "未知缺失字段不泄露");
+const evidence = formatWorkspaceText("RAG 命中「申请条件」原文片段（相关度 0.18）：政策 ID：suzhou-test-2026 政策有效性：ACTIVE 真实申请条件。");
+assert(!/RAG|0\.18|suzhou-test|ACTIVE/.test(evidence) && evidence.includes("申请条件") && evidence.includes("真实申请条件"), "隐藏算法、分数和ID，保留原文依据");
+const storage = { value: null as string | null, getItem: (_key: string) => storage.value, setItem: (_key: string, value: string) => { storage.value = value; } };
+persistActiveSessionId(storage, "session-a");
+assert(readActiveSessionId(storage, [sessionB, sessionA]) === "session-a", "重建后恢复选中的A而非列表首项B");
+persistActiveSessionId(storage, "session-b");
+assert(readActiveSessionId(storage, [sessionA, sessionB]) === "session-b", "切换B持久化");
+for (const saved of [null, "", "deleted-session", "{broken-json"]) {
+  storage.value = saved;
+  assert(readActiveSessionId(storage, [sessionA, sessionB]) === "session-a", "无效或旧存储使用原默认选择");
+}
+assert(readActiveSessionId(storage, []) === "", "空会话安全处理");
+const unavailable = { getItem: (_key: string): string | null => { throw new Error("disabled"); }, setItem: (_key: string, _value: string) => { throw new Error("disabled"); } };
+assert(readActiveSessionId(unavailable, [sessionA]) === "session-a", "禁用存储不阻塞初始化");
+persistActiveSessionId(unavailable, "session-a");
+console.log("Workspace 回归测试通过");

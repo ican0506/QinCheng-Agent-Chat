@@ -121,7 +121,7 @@ button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px sol
 .follow-up-list { display: grid; gap: 7px; }
 .follow-up-list button { padding: 9px 10px; border: 1px solid #cfd7e3; border-radius: 6px; color: #344054; background: #fff; text-align: left; font-size: 12px; line-height: 1.5; cursor: pointer; }
 .follow-up-list button:hover { border-color: #6e91cf; color: #155eef; background: #f5f8fd; }
-.match-reason { color: #52627a !important; }
+.match-reason { color: #52627a !important; overflow-wrap: anywhere; }
 .policy-status--pass { color: #166445; background: #eaf7f0; }
 .policy-status--unknown, .policy-status--manual_review { color: #835110; background: #fff4d9; }
 .policy-status--fail { color: #9e2d24; background: #fff0ee; }
