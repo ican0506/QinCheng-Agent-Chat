@@ -5,7 +5,7 @@ from app.realtime_policy.intent import FreshnessIntentDetector
 from app.realtime_policy.models import RealtimeSearchStatus
 from app.realtime_policy.tool import OfficialRealtimePolicySearchTool
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 
 class RealtimePolicySearchNode:

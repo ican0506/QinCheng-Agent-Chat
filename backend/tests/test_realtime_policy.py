@@ -1,5 +1,6 @@
 import asyncio
 from datetime import date
+import logging
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,28 @@ def test_freshness(message):
 def test_regular_question():
     assert not FreshnessIntentDetector.detect('创业社会保险补贴需要什么条件？').requiresRealtimeSearch
 
+
+@pytest.mark.parametrize('message', [
+    '我在苏州，本科，2026年6月20日毕业，目前未就业，只想找工作',
+    '我2026年毕业',
+    '我是2026届毕业生',
+    '毕业年份是2026',
+    '我是2025年毕业的',
+    '公司2026年注册',
+])
+def test_profile_year_facts_do_not_require_realtime_search(message):
+    assert not FreshnessIntentDetector.detect(message).requiresRealtimeSearch
+
+
+@pytest.mark.parametrize('message', [
+    '2026年苏州毕业生最新就业政策是什么？',
+    '我是2026届毕业生，现在还能申请什么补贴？',
+    '我想看2026届求职创业补贴之前的申报通知',
+    '2025届当时什么时候申报？',
+])
+def test_explicit_current_or_historical_lookup_still_requires_realtime_search(message):
+    assert FreshnessIntentDetector.detect(message).requiresRealtimeSearch
+
 @pytest.mark.parametrize('url,allowed', [('https://hrss.suzhou.gov.cn/a', True), ('https://www.suzhou.gov.cn/a', True), ('https://hrss.suzhou.gov.cn.fake.com/a', False), ('https://suzhou.gov.cn.evil.com/a', False), ('http://suzhou.gov.cn/a', False), ('https://localhost/a', False), ('https://127.0.0.1/a', False), ('file:///a', False)])
 def test_domains(url, allowed):
     assert bool(canonical_url(url, ['suzhou.gov.cn'])) is allowed
@@ -49,6 +72,87 @@ def test_disabled_and_not_triggered_do_not_call():
     n, _ = node(provider)
     assert run(n, '创业社会保险补贴需要什么条件？').realtimeSearchStatus == RealtimeSearchStatus.NOT_TRIGGERED
     assert provider.call_count == 0
+
+
+@pytest.mark.parametrize('message', [
+    '我在苏州，本科，2026年6月20日毕业，目前未就业，只想找工作',
+    '我2026年毕业',
+    '我是2026届毕业生',
+    '毕业年份是2026',
+    '创业社会保险补贴需要什么条件？',
+    '周末哪里看电影？',
+])
+def test_profile_year_regular_and_out_of_scope_messages_do_not_call_provider(message):
+    provider = FakeRealtimeSearchProvider([])
+    n, _ = node(provider)
+
+    state = run(n, message)
+
+    assert state.realtimeSearchStatus == RealtimeSearchStatus.NOT_TRIGGERED
+    assert provider.call_count == 0
+
+
+@pytest.mark.parametrize('message', [
+    '2026年苏州毕业生最新就业政策是什么？',
+    '我是2026届毕业生，现在还能申请什么补贴？',
+    '我想看2026届求职创业补贴之前的申报通知',
+    '2025届当时什么时候申报？',
+])
+def test_explicit_lookup_calls_provider_once(message):
+    provider = FakeRealtimeSearchProvider([])
+    n, _ = node(provider)
+
+    run(n, message)
+
+    assert provider.call_count == 1
+
+
+def test_profile_only_follow_up_does_not_repeat_previous_realtime_search():
+    provider = FakeRealtimeSearchProvider([])
+    n, _ = node(provider)
+
+    run(n, '2026年苏州毕业生最新就业政策是什么？')
+    run(n, '我是本科')
+
+    assert provider.call_count == 1
+
+
+def test_historical_exact_policy_notice_ranks_before_generic_newer_page():
+    provider = FakeRealtimeSearchProvider([
+        SearchResult(
+            title='创业校友分享求职就业攻略',
+            url='https://www.suzhou.gov.cn/generic',
+            snippet='就业创业经验分享',
+            publishedAt=date(2026, 9, 30),
+        ),
+        SearchResult(
+            title='求职创业补贴申报通知',
+            url='https://www.suzhou.gov.cn/notice',
+            snippet='求职创业补贴申报安排',
+            publishedAt=date(2025, 8, 23),
+        ),
+    ])
+    n, _ = node(provider)
+
+    state = run(n, '我想看2026届求职创业补贴之前的申报通知')
+
+    assert [hit.title for hit in state.realtimePolicyHits][:2] == [
+        '求职创业补贴申报通知',
+        '创业校友分享求职就业攻略',
+    ]
+
+
+def test_realtime_summary_is_emitted_to_uvicorn_log(caplog):
+    provider = FakeRealtimeSearchProvider([])
+    n, _ = node(provider)
+
+    with caplog.at_level(logging.INFO, logger='uvicorn.error'):
+        state = run(n)
+
+    assert state.realtimeSearchStatus == RealtimeSearchStatus.NO_RESULTS
+    assert 'realtime_policy_search' in caplog.text
+    assert 'triggered=True' in caplog.text
+    assert 'status=NO_RESULTS' in caplog.text
 
 def test_deduplicate_associate_and_read_only():
     repo = PolicyRepository(ROOT / 'policies.json')

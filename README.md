@@ -6,7 +6,7 @@
 
 ## 当前能力
 
-实时政策检索阶段：已具备实时政策检索 Tool 架构与 Provider 接口；默认未配置真实搜索 Provider 时不会实际联网。
+项目支持通过可配置的 Tavily Web Search Provider 查询官方最新政策信息；该能力默认关闭，只有显式启用并配置独立 API Key 后才会实际联网。
 
 时效性问题（最新、目前、今年、申报窗口、截止时间等）及明确历史通知查询，由 `FreshnessIntentDetector` 识别，在本地政策检索后执行独立 `RealtimePolicySearchNode`。普通条件咨询继续使用本地知识库。
 
@@ -14,9 +14,9 @@
 
 实时证据与本地 `PolicyCandidate` 分开保存。实时结果不参与资格 PASS/FAIL，也不修改本地政策、窗口、规则、材料或计划；新发现通知必须完成结构化核验后才能进入规则引擎。当前触发实时查询的最终回复采用确定性证据说明，保留标题、官方 URL 和存在的发布日期，避免模型扩写资格、金额或截止日期。
 
-当前提供厂商无关 `RealtimeSearchProvider` 协议、测试用 Fake Provider 和默认 Disabled Provider。未配置服务、查询无结果、超时/异常分别提示；后续流程继续使用本地政策库。配置位于 `backend/.env.example`，搜索 API Key 与 LLM Key 分开且示例为空。仅设置 provider 名称或 API Key 不会创建联网能力；需先实现真实 Provider 并在应用组装处选择它。
+当前保留厂商无关 `RealtimeSearchProvider` 协议、测试用 Fake Provider、默认 Disabled Provider，并实现 `TavilyRealtimeSearchProvider`。Provider 请求使用 `include_domains` 限制来源，结果返回后仍由本地安全层再次校验 HTTPS 与官方 allowlist。未配置 Key、查询无结果、超时或异常时，后续流程继续使用本地政策库。实时结果只作为官方证据，不直接参与资格 PASS/FAIL。
 
-本阶段不抓取网页正文、下载 PDF 或执行网页脚本，也未增加第三方依赖、缓存、数据库或前端实时证据面板。日志只记录触发状态、Provider 类型、结果数量和 `realtime_search_ms`，不记录用户画像、Key 或网页正文。
+本阶段不抓取网页正文、下载 PDF 或执行网页脚本，也未增加缓存、数据库或前端实时证据面板。日志只记录触发状态、Provider 类型、结果数量和 `realtime_search_ms`，不记录用户画像、Key 或网页正文。
 
 - 用户画像采用 LLM 结构化信息抽取，并通过 Pydantic/确定性规则进行字段校验和归一化；模型不可用时回退到本地规则解析器；
 - 苏州市高校毕业生就业创业政策检索；
@@ -36,6 +36,8 @@ ProfileNode
     ↓
 RagPolicySearchTool
     ↓
+RealtimePolicySearchNode（按需触发）
+    ↓
 RuleEligibilityTool
     ↓
 PolicyCompareTool
@@ -50,6 +52,7 @@ Chat API / SSE
 ```
 
 - `RagPolicySearchTool`：召回政策、检索原文片段并提供官方来源依据；知识库异常时回退到 `LocalPolicySearchTool`。
+- `RealtimePolicySearchNode`：仅在当前性或明确历史通知查询中调用配置的官方 Web Search Provider；异常时不中断本地流程。
 - `RuleEligibilityTool`：唯一负责确定性资格判断，LLM 不决定资格结论。
 - `PolicyCompareTool`：只读取显式、可追溯的关系配置，不根据名称、主题或人群猜测政策间关系。
 - `PlanTool`：根据资格结果、政策时效、申报窗口、缺失信息、材料和显式关系生成结构化办理步骤。
@@ -131,6 +134,7 @@ NOTICE
 - Backend：FastAPI、Pydantic、WorkflowAgent
 - Policy：PolicyRepository、PolicyRecord、PolicyCondition
 - Retrieval：RagPolicySearchTool、中文字符 n-gram TF-IDF、LocalPolicySearchTool fallback
+- Realtime Search：Tavily Search API、httpx async client、官方域名 allowlist
 - Eligibility：RuleEligibilityTool
 - Planning：PolicyCompareTool、PlanTool
 - LLM：OpenAI-compatible provider
@@ -167,6 +171,16 @@ python -m uvicorn app.main:app --reload
 - Swagger：`http://127.0.0.1:8000/docs`
 
 如需真实 LLM 调用，复制 `backend/.env.example` 为 `.env`，并按现有环境变量配置 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`。`PROFILE_EXTRACTION_ENABLED=true` 时启用 LLM 结构化画像抽取并在失败时回退规则解析；设为 `false` 时仅使用规则解析。不要提交 `.env` 或真实 API Key。
+
+如需启用实时官方政策检索，在本地 `.env` 中配置：
+
+```env
+REALTIME_POLICY_SEARCH_ENABLED=true
+REALTIME_POLICY_SEARCH_PROVIDER=tavily
+REALTIME_POLICY_SEARCH_API_KEY=你的_Tavily_API_Key
+```
+
+默认仅查询 `suzhou.gov.cn`、`hrss.suzhou.gov.cn` 及其子域。Provider 异常会自动回退本地知识库；实时网页结果不会覆盖结构化政策规则，也不会直接生成资格、材料或申请计划。不要提交真实 Search API Key。
 
 ### 前端
 

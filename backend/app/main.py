@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from app.agent.workflow import WorkflowAgent
 from app.agent.nodes.realtime_policy_search import RealtimePolicySearchNode
 from app.realtime_policy.provider import RealtimeSearchProvider, DisabledRealtimeSearchProvider
+from app.realtime_policy.tavily import TavilyRealtimeSearchProvider
 from app.realtime_policy.tool import OfficialRealtimePolicySearchTool
 from app.agent.tools.local_policy import LocalPolicySearchTool
 from app.agent.tools.rag_policy import RagPolicySearchTool
@@ -34,6 +35,23 @@ from app.services.llm.openai_compatible import OpenAICompatibleProvider
 from app.stores.session_store import InMemorySessionStore
 
 logger = logging.getLogger(__name__)
+
+
+def _build_realtime_provider(settings: Settings) -> RealtimeSearchProvider:
+    if not settings.realtime_policy_search_enabled:
+        return DisabledRealtimeSearchProvider()
+    provider_name = settings.realtime_policy_search_provider.strip().lower()
+    if provider_name != "tavily":
+        raise ValueError(
+            f"Unsupported realtime policy search provider: {provider_name or '<empty>'}"
+        )
+    if not settings.realtime_policy_search_api_key.strip():
+        logger.warning("realtime search enabled but API key missing provider=tavily")
+        return DisabledRealtimeSearchProvider()
+    return TavilyRealtimeSearchProvider(
+        api_key=settings.realtime_policy_search_api_key,
+        timeout_seconds=settings.realtime_policy_search_timeout_seconds,
+    )
 
 
 def _trace_id(request: Request) -> str:
@@ -79,13 +97,18 @@ def create_app(
     policy_relation_repository = PolicyRelationRepository(
         backend_root / "data" / "policies" / "policy_relations.json"
     )
+    active_realtime_provider = (
+        realtime_provider
+        if realtime_provider is not None
+        else _build_realtime_provider(active_settings)
+    )
     workflow_agent = WorkflowAgent.production(
         policy_repository,
         policy_search_tool,
         DeterministicPolicyCompareTool(policy_repository, policy_relation_repository),
         DeterministicPlanTool(policy_repository),
         RealtimePolicySearchNode(OfficialRealtimePolicySearchTool(
-            realtime_provider if realtime_provider is not None else DisabledRealtimeSearchProvider(),
+            active_realtime_provider,
             policy_repository, list(active_settings.realtime_policy_allowed_domains),
             timeout_seconds=active_settings.realtime_policy_search_timeout_seconds,
             max_results=active_settings.realtime_policy_search_max_results,
@@ -100,6 +123,7 @@ def create_app(
     application.state.policy_repository = policy_repository
     application.state.policy_relation_repository = policy_relation_repository
     application.state.rag_retriever = rag_retriever
+    application.state.realtime_search_provider = active_realtime_provider
     application.state.workflow_agent = workflow_agent
     profile_extractor = (
         LLMProfileExtractor(active_provider, active_settings.profile_extraction_timeout_seconds)
