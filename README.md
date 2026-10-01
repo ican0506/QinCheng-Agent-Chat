@@ -1,69 +1,115 @@
-# 高校毕业生就业创业政策智能 Agent
+# 青程 Agent
 
-面向高校毕业生就业、创业场景的政策信息检索、资格辅助判断与办理路径规划项目。后端提供普通 Chat 与 SSE 流式接口；前端提供 Vue 3 对话界面。
+面向高校毕业生和青年群体的就业创业政务办事 Agent。它不止回答政策问题，还会围绕用户的实际办事目标，持续补充画像、检索相关政策、进行资格辅助判断、检查材料准备情况，并生成可执行的办理路径；对于具有时效性的政策问题，还可以按需检索最新官方公开信息。
 
-本项目不是政府部门审批系统。最终资格、申报材料、办理时间和审批结果以相关政府部门最新官方规定及实际审核为准。
+> 本项目提供政策检索、资格初步判断、材料检查和办理路径规划，不代替政府部门审批，也不会自动向政府部门提交申请。政策效力、申报要求和最终审批结果以主管部门最新规定及实际审核为准。
 
-## 当前能力
+## 核心能力
 
-项目支持通过可配置的 Tavily Web Search Provider 查询官方最新政策信息；该能力默认关闭，只有显式启用并配置独立 API Key 后才会实际联网。
+### 用户画像理解
 
-时效性问题（最新、目前、今年、申报窗口、截止时间等）及明确历史通知查询，由 `FreshnessIntentDetector` 识别，在本地政策检索后执行独立 `RealtimePolicySearchNode`。普通条件咨询继续使用本地知识库。
+系统采用“确定性规则解析 + 可选 LLM 结构化抽取”的方式理解当前用户消息。LLM 输出须经过严格 Pydantic 校验；不可用、超时或输出非法时，自动回退规则解析结果。
 
-`OfficialRealtimePolicySearchTool` 只接受 HTTPS 官方 allowlist 来源，默认域名为 `suzhou.gov.cn`、`hrss.suzhou.gov.cn`。结果按保守规范化 URL 去重，结合关键词、发布日期与本地关联排序。sourceUrl 完全一致或规范化政策名称完全一致且唯一时才关联本地 policyId。
+当前可积累的画像信息包括：
 
-实时证据与本地 `PolicyCandidate` 分开保存。实时结果不参与资格 PASS/FAIL，也不修改本地政策、窗口、规则、材料或计划；新发现通知必须完成结构化核验后才能进入规则引擎。当前触发实时查询的最终回复采用确定性证据说明，保留标题、官方 URL 和存在的发布日期，避免模型扩写资格、金额或截止日期。
+- 城市、学历、毕业年份和精确毕业日期；
+- 就业状态、创业意图和求职意图；
+- 社保缴纳月数、灵活就业参保情况；
+- 经营主体注册时长等办事条件。
 
-当前保留厂商无关 `RealtimeSearchProvider` 协议、测试用 Fake Provider、默认 Disabled Provider，并实现 `TavilyRealtimeSearchProvider`。Provider 请求使用 `include_domains` 限制来源，结果返回后仍由本地安全层再次校验 HTTPS 与官方 allowlist。未配置 Key、查询无结果、超时或异常时，后续流程继续使用本地政策库。实时结果只作为官方证据，不直接参与资格 PASS/FAIL。
+画像支持多轮补充、用户纠错和 Session 级隔离，并能处理：
 
-本阶段不抓取网页正文、下载 PDF 或执行网页脚本，也未增加缓存、数据库或前端实时证据面板。日志只记录触发状态、Provider 类型、结果数量和 `realtime_search_ms`，不记录用户画像、Key 或网页正文。
+- 相对时间：今年、去年、前年、明年；
+- ISO 日期：`2025-06-20`；
+- 中文日期：`2025年6月20日`；
+- “待业”等自然语言状态归一。
 
-- 用户画像采用 LLM 结构化信息抽取，并通过 Pydantic/确定性规则进行字段校验和归一化；模型不可用时回退到本地规则解析器；
-- 苏州市高校毕业生就业创业政策检索；
-- 已核验官方政策原文知识库检索与来源追溯；
-- 确定性资格辅助判断：`PASS`、`FAIL`、`UNKNOWN`、`MANUAL_REVIEW`；
-- 确定性政策关系分析与办理路径规划；
-- 官方结构化材料清单与轻量材料准备状态预检；
-- OpenAI-compatible LLM 仅负责画像信息抽取和语言组织解释；
-- `POST /api/agent/chat` 与 `POST /api/agent/chat/stream`。
+### 政策检索与证据
 
-## 当前 Workflow
+项目采用两层政策信息来源：
 
-```text
-User Message
-    ↓
-ProfileNode
-    ↓
-RagPolicySearchTool
-    ↓
-RealtimePolicySearchNode（按需触发）
-    ↓
-RuleEligibilityTool
-    ↓
-PolicyCompareTool
-    ↓
-MaterialCheckTool
-    ↓
-PlanTool
-    ↓
-LLM Explanation
-    ↓
-Chat API / SSE
+1. **本地已核验政策库**：通过 `PolicyRepository` 加载 `policies.json` 和对应 raw Markdown，使用轻量本地 RAG 召回政策与原文证据。
+2. **实时官方政策搜索**：通过 `TavilyRealtimeSearchProvider` 按需查询最新政策、申报窗口、截止日期和历史官方通知。
+
+只有本地政策库中的结构化 `PolicyRecord` 才能正式进入资格判断、材料检查和办理计划。实时搜索结果用于补充官方证据，不能替代结构化规则。
+
+### 确定性业务判断
+
+- `RuleEligibilityTool` 负责资格状态，不由 LLM 决定 `PASS / FAIL`；
+- `MaterialCheckTool` 根据结构化材料和用户明确声明更新材料状态；
+- `PolicyCompareTool` 只读取显式配置的政策关系，不根据名称或主题猜测；
+- `PlanTool` 根据候选政策、资格、缺失条件和材料情况生成稳定的办理步骤。
+
+## 系统架构
+
+```mermaid
+flowchart TD
+    U[用户] --> C[Chat API / SSE]
+    C --> P[Profile Parsing]
+    P --> Q[Policy Query Context]
+    Q --> W[WorkflowAgent]
+    W --> R[Local RAG Policy Search]
+    R --> RT[Realtime Policy Search]
+    RT --> E[Rule Eligibility]
+    RT --> RE[Realtime Evidence]
+    E --> PC[Policy Compare]
+    PC --> M[Material Check]
+    M --> PL[Deterministic Plan]
+    RE --> X[Final Explanation / Fallback]
+    PL --> X
+    X --> D[ChatData]
+    D --> UI[Chat + Workspace]
 ```
 
-- `RagPolicySearchTool`：召回政策、检索原文片段并提供官方来源依据；知识库异常时回退到 `LocalPolicySearchTool`。
-- `RealtimePolicySearchNode`：仅在当前性或明确历史通知查询中调用配置的官方 Web Search Provider；异常时不中断本地流程。
-- `RuleEligibilityTool`：唯一负责确定性资格判断，LLM 不决定资格结论。
-- `PolicyCompareTool`：只读取显式、可追溯的关系配置，不根据名称、主题或人群猜测政策间关系。
-- `PlanTool`：根据资格结果、政策时效、申报窗口、缺失信息、材料和显式关系生成结构化办理步骤。
-- `MaterialCheckTool`：只读取已核验政策记录中的具体材料，并依据用户明确陈述标记材料准备状态；不识别文件、不判断真伪。
-- LLM：只负责结构化画像信息抽取和基于 Agent State 的最终中文说明；资格判断仍由 RuleEligibilityTool 完成。
+主要技术栈：
 
-## 政策数据范围
+- Frontend：Vue 3、TypeScript、Vite；
+- Backend：FastAPI、Pydantic、WorkflowAgent；
+- Policy：PolicyRepository、PolicyRecord、PolicyCondition；
+- Retrieval：RagPolicySearchTool、中文字符 n-gram TF-IDF、LocalPolicySearchTool fallback；
+- Realtime Search：Tavily Search API、httpx async client、官方域名 allowlist；
+- Eligibility：RuleEligibilityTool；
+- Planning：PolicyCompareTool、MaterialCheckTool、PlanTool；
+- LLM：OpenAI-compatible provider，仅用于画像抽取和必要的结果解释。
 
-当前仅覆盖苏州市高校毕业生就业创业场景的 5 条已核验政策记录，包括一次性创业补贴、创业社会保险补贴、灵活就业社会保险补贴、就业见习与求职创业补贴历史通知。
+## Agent Workflow
 
-来源为苏州市政府官网、苏州市人力资源和社会保障局等官方页面。数据保存在：
+生产链路为：
+
+```text
+ProfileNode
+  → PolicySearchNode（RagPolicySearchTool）
+  → RealtimePolicySearchNode（按需）
+  → EligibilityNode（RuleEligibilityTool）
+  → PolicyCompareNode
+  → MaterialCheckNode
+  → PlanNode
+  → Final Explanation / Deterministic Fallback
+```
+
+- `ProfileNode` 在核心画像不足时生成有限的 Follow-up，并提前停止后续 Workflow；
+- `RagPolicySearchTool` 负责本地政策召回和原文 evidence，异常时回退 `LocalPolicySearchTool`；
+- `RealtimePolicySearchNode` 只在明确当前性或历史官方查询中运行，并非每次请求都联网；
+- `RuleEligibilityTool` 是资格判断的唯一确定性来源；
+- 后续节点始终使用本轮最新候选政策重新计算，不累积上一轮失效的资格、追问或计划。
+
+对公开接口保持兼容：
+
+```text
+POST /api/agent/chat
+POST /api/agent/chat/stream
+```
+
+SSE 事件保持 `delta / done / error`。确定性回复可以没有 `delta`，但成功路径最后一个事件始终为 `done`，完整结果位于 `done.data`。
+
+## 政策数据与本地 RAG
+
+当前知识库主要聚焦苏州市高校毕业生和青年就业创业政策，政策来源主要为：
+
+- 苏州市人民政府；
+- 苏州市人力资源和社会保障局。
+
+数据目录：
 
 ```text
 backend/data/policies/policies.json
@@ -71,50 +117,116 @@ backend/data/policies/raw/*.md
 backend/data/policies/policy_relations.json
 ```
 
-`policy_relations.json` 当前为空数组：现有 5 条政策没有足够官方依据支持 `MUTEX` 或 `PREREQUISITE`，项目不会为了演示制造关系。
-
-## 本地政策原文检索
-
-知识库只使用已核验的本地 Markdown 政策原文，并能将每个命中片段追溯到政策 ID、官方 `sourceUrl`、时效状态和最后核验日期。
-
-检索过程：
+本地检索链路：
 
 ```text
-Markdown 二级标题优先切分
-    ↓
-Metadata Filter（地区 / 主题 / 目标人群 / 时效状态）
-    ↓
-中文字符 2/3-gram TF-IDF
-    ↓
-余弦相关性排序 + Top-K + 最低相关度阈值
-    ↓
-PolicyCandidate 去重
+Markdown 标题优先切分
+  → Metadata Filter（地区 / 主题 / 目标人群 / 时效状态）
+  → 中文字符 2/3-gram TF-IDF
+  → 余弦相关性排序 + Top-K + 最低相关度阈值
+  → PolicyCandidate 去重
 ```
 
-这是轻量本地文本相关性检索，不是 embedding、深度语义模型或外部向量数据库。
+每个命中片段保留政策 ID、政策名称、官方 `sourceUrl`、时效状态、最后核验日期和 chunk 信息。这是零新增模型依赖的本地文本相关性检索，不是 embedding 模型或外部向量数据库。
 
-## 资格辅助判断
+`policy_relations.json` 当前保持空关系集合：现有政策没有足够官方依据支持 `MUTEX` 或 `PREREQUISITE`，项目不会为了展示效果制造政策关系。
 
-`RuleEligibilityTool` 是确定性规则引擎，支持：
+## 实时官方政策检索
+
+项目已接入 `TavilyRealtimeSearchProvider`，并完成真实联网验证。实时检索主要服务于：
+
+- 最新政策发现；
+- “现在还能不能申请”等当前状态查询；
+- 最新官方通知、申报窗口和截止日期；
+- 明确的历史官方申报通知查询。
+
+默认官方域名 allowlist：
+
+```text
+suzhou.gov.cn
+hrss.suzhou.gov.cn
+```
+
+Provider 请求时使用 domain restriction；返回结果还会再次经过本地 HTTPS、hostname 和 allowlist 校验。真实验证已成功返回 `suzhou.gov.cn`、`www.suzhou.gov.cn`、`hrss.suzhou.gov.cn` 官方页面。项目不直接抓取任意用户 URL，不执行网页脚本，也不把第三方转载作为正式实时证据。
+
+### 触发规则
+
+以下表达会触发实时官方检索：
+
+- 最新、最近发布、新政策；
+- 现在还能申请吗、还能申领吗；
+- 申报窗口、截止时间；
+- 明确查询之前、往年、当时的官方申报通知。
+
+单纯画像事实不会因为出现年份或届别而触发 Tavily，例如：
+
+- “我是2026届毕业生”；
+- “我2026年毕业”；
+- “毕业日期是2026年6月20日”。
+
+这可以避免无意义的实时调用和额外延迟。
+
+### 与资格判断的边界
+
+实时网页搜索结果不等于资格判断结果。Tavily 负责发现最新官方公开信息；资格判断仍由：
+
+```text
+PolicyRepository
+  + PolicyCondition
+  + RuleEligibilityTool
+```
+
+共同完成。
+
+当实时搜索发现本地 Repository 尚未结构化的新政策时，结果保持 `relatedPolicyId = None`，系统只提示：
+
+> 发现新的官方政策/通知，但尚未完成结构化核验，暂不能自动判断是否符合。
+
+该结果不会自动进入 `policies`、`eligibility`、`materialResults` 或生成 `APPLY_POLICY` 计划。即使实时证据可靠关联了已有政策，资格判断也仍读取本地 PolicyRecord 规则。
+
+## 资格判断
+
+`RuleEligibilityTool` 根据结构化 `PolicyCondition` 执行确定性判断，当前基础 operator 包括：
 
 ```text
 eq / gte / lte / in / not_in / exists / within_years
 ```
 
-结果语义：
+状态与用户侧语义：
 
-- `PASS`：当前结构化信息明确满足；
-- `FAIL`：当前结构化信息明确不满足；
-- `UNKNOWN`：缺少必要信息，会转为有限的补充问题；
-- `MANUAL_REVIEW`：需要材料或经办机构人工确认。
+| 状态 | 用户侧含义 |
+|---|---|
+| `PASS` | 基本符合 |
+| `FAIL` | 当前信息下暂不符合 |
+| `UNKNOWN` | 信息不足，暂无法判断 |
+| `MANUAL_REVIEW` | 需要人工核验 |
 
-LLM 不参与最终资格判断，也不覆盖上述状态。
+LLM 可以解释结果，但不能生成或覆盖上述资格状态。缺少字段时，Follow-up 只从当前候选政策的真实 `missingFields` 生成，并对相同问题去重。
 
-## 政策关系与办理路径
+系统区分政策依据有效性与申报窗口状态：
 
-`PolicyCompareTool` 支持 `PREREQUISITE`、`PARALLEL`、`MUTEX`、`TIME_DEPENDENT`，但只输出显式配置且有政策依据的关系。
+- 政策依据记录 `ACTIVE / EXPIRED / HISTORICAL / UNKNOWN`；
+- 申报窗口独立记录 `OPEN / CLOSED / NOT_STARTED / UNKNOWN`；
+- `CLOSED` 不等于资格 `FAIL`，历史或关闭记录也不会被描述成当前仍可申请；
+- CURRENT 查询优先当前有效政策，明确历史查询允许历史通知优先召回。
 
-`PlanTool` 使用以下结构化动作生成稳定步骤：
+## 材料检查与办理计划
+
+### 材料检查
+
+`MaterialCheckTool` 支持：
+
+```text
+READY / MISSING / UNKNOWN / MANUAL_REVIEW
+```
+
+用户可以通过自然语言或 Workspace 操作声明“我已准备”“我还没有”。前端会实际发送 Chat/SSE 请求，材料状态由后端 Session 保存并重新计算；Workspace 只使用最新 SSE `done.data`，不会在本地伪造业务结果。
+
+对于 `HISTORICAL` 或申请窗口 `CLOSED` 的记录，材料仅作为历史参考展示，并隐藏会改变当前材料状态的操作。
+
+### 办理计划
+
+确定性 PlanTool 根据政策候选、资格状态、缺失条件和材料情况生成以下动作：
 
 ```text
 PROVIDE_INFO
@@ -126,61 +238,59 @@ WAIT_FOR_WINDOW
 NOTICE
 ```
 
-计划不会自动审批：`FAIL`、历史或失效政策不会进入申请主路径；窗口关闭的政策会生成等待窗口提示；相同缺失字段只会生成一条统一补充信息步骤。
+`FAIL`、历史或失效政策不会进入当前申请主路径；窗口关闭会生成等待或提示步骤；多个政策缺少相同字段时只生成一条统一补充步骤。系统只规划办理路径，不自动审批或提交正式申请。
 
-## 技术栈
+## 多轮会话与 Session
 
-- Frontend：Vue 3、TypeScript、Vite
-- Backend：FastAPI、Pydantic、WorkflowAgent
-- Policy：PolicyRepository、PolicyRecord、PolicyCondition
-- Retrieval：RagPolicySearchTool、中文字符 n-gram TF-IDF、LocalPolicySearchTool fallback
-- Realtime Search：Tavily Search API、httpx async client、官方域名 allowlist
-- Eligibility：RuleEligibilityTool
-- Planning：PolicyCompareTool、PlanTool
-- LLM：OpenAI-compatible provider
+每个 Session 独立保存：
 
-## 本地启动
+- 内部用户画像；
+- 材料声明；
+- 政策查询上下文；
+- 对话历史。
+
+新建任务不会继承其他任务的学历、毕业年份、意图、社保信息或材料状态。`policy_query_context` 用于保留用户正在咨询的政策目标：当下一轮只说“其实我是硕士”时，系统可以更新画像而不丢失原政策主题。
+
+前端按 Session 保存各自最新的 `ChatData`，`activeSessionId` 与会话列表保存在 localStorage，刷新页面后恢复当前任务。`delta` 只更新聊天流式文本，`done` 一次性写入完整 `done.data`，`error` 保留上一份有效 Workspace 数据。
+
+后端当前使用进程内 `InMemorySessionStore`。服务重启后后端画像、材料声明和查询上下文不会持久化；后续如需生产部署，应在现有 Store 接口后接入持久化实现。
+
+## Final Explanation 与性能优化
+
+Final Explanation LLM 并非每次请求都调用。以下确定性场景可以直接跳过：
+
+- `OUT_OF_SCOPE`；
+- `FOLLOW_UP`；
+- `HISTORICAL_ONLY`；
+- `NO_POLICY`；
+- `MATERIAL_UPDATE`；
+- `REALTIME_STATUS_ONLY`。
+
+复杂多政策比较或确有必要的资格解释仍可使用 Final Explanation LLM。当前默认超时配置：
+
+```env
+PROFILE_EXTRACTION_TIMEOUT_SECONDS=5
+FINAL_EXPLANATION_TIMEOUT_SECONDS=12
+```
+
+如果 LLM 超时或不可用，系统保留完整结构化 `ChatData`，HTTP/SSE 主链路正常结束，并自动使用 deterministic fallback。
+
+针对过去部分简单请求出现的 17～24 秒长尾，当前实测参考值包括：学历纠正约 2～3 秒、历史通知约 2～3 秒、材料状态更新约 3～4 秒。上述数字是本地环境优化结果，不是生产 SLA；核心改进是简单确定性路径不再无意义等待 Final LLM。
+
+## 快速开始
 
 ### 后端
 
 ```powershell
 cd backend
 python -m venv .venv
-```
-
-Windows PowerShell：
-
-```powershell
 .\.venv\Scripts\Activate.ps1
-```
-
-Windows Git Bash：
-
-```bash
-source .venv/Scripts/activate
-```
-
-安装并启动：
-
-```powershell
 pip install -r requirements.txt
 python -m uvicorn app.main:app --reload
 ```
 
-- 服务地址：`http://127.0.0.1:8000`
+- API：`http://127.0.0.1:8000`
 - Swagger：`http://127.0.0.1:8000/docs`
-
-如需真实 LLM 调用，复制 `backend/.env.example` 为 `.env`，并按现有环境变量配置 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`。`PROFILE_EXTRACTION_ENABLED=true` 时启用 LLM 结构化画像抽取并在失败时回退规则解析；设为 `false` 时仅使用规则解析。不要提交 `.env` 或真实 API Key。
-
-如需启用实时官方政策检索，在本地 `.env` 中配置：
-
-```env
-REALTIME_POLICY_SEARCH_ENABLED=true
-REALTIME_POLICY_SEARCH_PROVIDER=tavily
-REALTIME_POLICY_SEARCH_API_KEY=你的_Tavily_API_Key
-```
-
-默认仅查询 `suzhou.gov.cn`、`hrss.suzhou.gov.cn` 及其子域。Provider 异常会自动回退本地知识库；实时网页结果不会覆盖结构化政策规则，也不会直接生成资格、材料或申请计划。不要提交真实 Search API Key。
 
 ### 前端
 
@@ -190,29 +300,128 @@ npm install
 npm run dev
 ```
 
-开发地址默认为 `http://localhost:5173`。
+前端开发地址：`http://127.0.0.1:5173`
 
-## 测试
+## 环境变量
+
+复制 `backend/.env.example` 为 `backend/.env`，再按本地环境填写。不要提交 `.env`、真实 API Key 或 Token。
+
+LLM 相关配置示例：
+
+```env
+LLM_BASE_URL=你的_OpenAI_兼容服务地址
+LLM_API_KEY=
+LLM_MODEL=你的模型名称
+PROFILE_EXTRACTION_ENABLED=true
+PROFILE_EXTRACTION_TIMEOUT_SECONDS=5
+FINAL_EXPLANATION_TIMEOUT_SECONDS=12
+```
+
+启用 Tavily 实时搜索：
+
+```env
+REALTIME_POLICY_SEARCH_ENABLED=true
+REALTIME_POLICY_SEARCH_PROVIDER=tavily
+REALTIME_POLICY_SEARCH_API_KEY=
+REALTIME_POLICY_ALLOWED_DOMAINS=suzhou.gov.cn,hrss.suzhou.gov.cn
+REALTIME_POLICY_SEARCH_TIMEOUT_SECONDS=8
+REALTIME_POLICY_SEARCH_MAX_RESULTS=5
+```
+
+真实 Key 只能保存在本地 `backend/.env`。仓库中的 `backend/.env.example` 必须保持 `REALTIME_POLICY_SEARCH_API_KEY=` 为空。实时检索默认关闭；未配置、无结果、超时或 Provider 异常时，本地政策检索、资格、材料和计划链路仍继续运行。
+
+## 测试与验证
+
+Backend 全量测试：
 
 ```powershell
 cd backend
-pytest
+D:\venvs\qincheng-agent\Scripts\python.exe -m pytest --basetemp="$env:USERPROFILE\qincheng-pytest-tmp"
+```
 
-cd ../frontend
+也可以在已激活项目虚拟环境后执行 `pytest`。
+
+Frontend：
+
+```powershell
+cd frontend
+npm run test:workspace
 npm run typecheck
 npm run build
 ```
 
-比赛演示输入与预期结果见 [docs/COMPETITION_SCENARIOS.md](docs/COMPETITION_SCENARIOS.md)，发布前检查见 [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)。
+当前验证基线：
+
+- Backend：`247 passed`；
+- Workspace tests：通过；
+- TypeScript typecheck：通过；
+- Frontend build：通过。
+
+Realtime / Provider 测试已覆盖 Tavily 正常响应、timeout、401/403、429、5xx、非法响应、官方域名过滤、Provider 装配和调用次数；同时覆盖普通画像与 OUT_OF_SCOPE 不调用实时 Provider。
+
+## 典型演示场景
+
+### 1. 相对年份与 Follow-up
+
+输入：
+
+> 我去年本科毕业，目前待业，我在苏州
+
+展示相对年份理解、画像归一、政策匹配，以及只针对缺失字段生成的 Follow-up。
+
+### 2. 完整创业画像
+
+输入：
+
+> 我在苏州，本科，2025年6月20日毕业，目前创业中，连续缴纳社保12个月，公司注册12个月
+
+展示精确日期理解、确定性资格判断、真实材料清单和办理计划。
+
+### 3. 实时官方政策查询
+
+输入：
+
+> 苏州创业社会保险补贴现在还能申请吗？
+
+展示 Tavily 官方检索、官方 evidence、本地结构化资格判断，以及实时信息与资格规则的隔离。
+
+### 4. 用户意图纠正
+
+输入：
+
+> 我不是创业，我只是自己按灵活就业交社保
+
+展示最新明确意图覆盖历史意图、创业政策退出，以及候选政策、Follow-up 和计划重新收敛。
+
+### 5. OUT_OF_SCOPE 分流
+
+输入：
+
+> 周末哪里看电影？
+
+展示无关问题直接分流：不强制进入画像收集、不召回政策、不调用 Tavily。
+
+## 安全与可信性
+
+- 实时搜索只允许 HTTPS 官方域名，并对 hostname 做二次校验；
+- Provider domain restriction 与本地 allowlist 双重限制来源；
+- 实时网页证据与结构化资格判断隔离；
+- LLM 不直接决定 `PASS / FAIL / UNKNOWN / MANUAL_REVIEW`；
+- 新政策未结构化前不能进入 Eligibility、Material 或 Plan；
+- Provider 失败自动回退本地知识库，不中断主 Workflow；
+- Session 画像、材料和查询上下文相互隔离；
+- Tavily 与 LLM Key 只读取本地环境变量，不进入 Git；
+- 日志记录状态与阶段耗时，不记录 API Key。
 
 ## 当前限制
 
-- 当前政策库仅有 5 条真实苏州市政策，不覆盖全国或完整苏州市全部政策；
-- 当前主要覆盖高校毕业生就业创业场景；
-- 本地原文检索不是 embedding 模型；
-- 部分政策条件需要 `MANUAL_REVIEW`；
-- 部分政策的 `applicationStatus` 仍为 `UNKNOWN`；
-- 部分政策的官方材料和流程信息不完整；
-- 当前不支持 OCR、文件上传、材料真伪校验或自动审批；材料完整性取决于已核验的结构化政策记录；
-- 前端 Workspace 由每个会话最近一次 SSE `done.data` 的真实 `ChatData` 驱动，展示后端返回的政策、资格辅助判断、补充问题、办理计划与官方来源；
-- 尚未实现 OCR、文件上传、材料识别、Dify、外部向量数据库和业务数据库持久化。
+- 结构化知识库当前主要聚焦苏州市高校毕业生和青年就业创业政策，不保证覆盖全国或苏州市全部政策；
+- 实时发现的新政策必须经过人工核验和结构化后，才能进入自动资格判断；
+- 部分政策条件、材料和办理口径仍需要 `MANUAL_REVIEW`；
+- 实时搜索依赖 Tavily 服务和官方网页可用性；
+- 后端 Session 当前为进程内存储，尚未接入业务数据库；
+- PDF、OCR、文件上传和复杂附件审核尚未作为正式核心能力；
+- 系统不自动提交政府申请，也不代替主管部门正式审批；
+- 最终政策效力、申报窗口和审批结果以对应主管部门为准。
+
+比赛演示脚本见 [docs/COMPETITION_SCENARIOS.md](docs/COMPETITION_SCENARIOS.md)，发布前检查见 [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)。
