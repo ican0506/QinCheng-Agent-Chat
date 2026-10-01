@@ -7,6 +7,7 @@ import json
 import logging
 from time import perf_counter
 from typing import Literal
+import asyncio
 
 from app.agent.models import GovernmentAgentState
 from app.realtime_policy.models import RealtimeSearchStatus
@@ -20,9 +21,15 @@ from app.services.llm_profile_extractor import LLMProfileExtractor, ProfileExtra
 from app.services.policy_query_context import PolicyDomainIntent, PolicyDomainIntentDetector, PolicyQueryContextResolver
 from app.policy.repository import PolicyRepository
 from app.policy.models import ApplicationStatus, ValidityStatus
+from app.services.final_explanation_policy import (
+    FinalExplanationDecision,
+    FinalExplanationPolicy,
+    FinalExplanationSkipReason,
+)
 
 
 logger = logging.getLogger(__name__)
+timing_logger = logging.getLogger("uvicorn.error")
 
 
 SYSTEM_PROMPT = """你是面向应届毕业生的就业创业政策对话助手。
@@ -45,14 +52,25 @@ class ChatStreamEvent:
     data: ChatData | None = None
 
 
+@dataclass
+class RequestTimings:
+    profile_extraction_ms: float = 0
+    workflow_ms: float = 0
+    realtime_search_ms: float = 0
+    material_updated: bool = False
+    profile_extraction_calls: int = 0
+    final_explanation_calls: int = 0
+
+
 class ChatService:
-    def __init__(self, provider: LLMProvider, store: InMemorySessionStore, workflow_agent: WorkflowAgent, profile_extractor: LLMProfileExtractor | None = None, current_date: date | None = None, policy_repository: PolicyRepository | None = None) -> None:
+    def __init__(self, provider: LLMProvider, store: InMemorySessionStore, workflow_agent: WorkflowAgent, profile_extractor: LLMProfileExtractor | None = None, current_date: date | None = None, policy_repository: PolicyRepository | None = None, final_explanation_timeout_seconds: float = 12) -> None:
         self._provider = provider
         self._store = store
         self._workflow_agent = workflow_agent
         self._profile_extractor = profile_extractor
         self._current_date = current_date
         self._policy_repository = policy_repository
+        self._final_explanation_timeout_seconds = final_explanation_timeout_seconds
 
     async def _messages(
         self, request: ChatRequest, state: GovernmentAgentState
@@ -87,8 +105,13 @@ class ChatService:
         )
 
     @staticmethod
-    def _fallback_reply(state: GovernmentAgentState) -> str:
+    def _fallback_reply(
+        state: GovernmentAgentState,
+        decision: FinalExplanationDecision | None = None,
+    ) -> str:
         local_reply = ChatService._local_fallback_reply(state)
+        if decision and decision.skip_reason is FinalExplanationSkipReason.MATERIAL_UPDATE:
+            local_reply = "已记录您本轮更新的材料准备情况。\n\n" + local_reply
         realtime_reply = ChatService._realtime_reply(state)
         return local_reply + ("\n\n" + realtime_reply if realtime_reply else "")
 
@@ -153,23 +176,28 @@ class ChatService:
 
     @staticmethod
     def _may_use_llm_reply(state: GovernmentAgentState, reply: str) -> bool:
-        # 第一阶段所有外部检索回复使用确定性证据段，避免自由文本改变资格或窗口事实。
-        if state.realtimeSearchStatus is not RealtimeSearchStatus.NOT_TRIGGERED:
-            return False
         if state.domainIntent is PolicyDomainIntent.OUT_OF_SCOPE or state.policyReferenceNotices:
             return False
         if state.candidatePolicies or state.needFollowUp:
             return bool(state.candidatePolicies) and not state.needFollowUp
         return not any(term in reply for term in ("补贴", "见习", "贷款", "创业社会保险"))
 
-    async def _run_workflow(self, request: ChatRequest) -> GovernmentAgentState:
+    async def _run_workflow(
+        self, request: ChatRequest, timings: RequestTimings | None = None
+    ) -> GovernmentAgentState:
+        metrics = timings or RequestTimings()
         declarations = await self._store.get_material_declarations(request.sessionId, request.userId)
         stored_profile = await self._store.get_internal_profile(request.sessionId, request.userId)
         previous_query = await self._store.get_policy_query_context(request.sessionId, request.userId)
         query_context, search_query = PolicyQueryContextResolver.resolve(request.message, previous_query)
         await self._store.set_policy_query_context(request.sessionId, request.userId, query_context)
         if PolicyDomainIntentDetector.detect(request.message) is PolicyDomainIntent.OUT_OF_SCOPE:
-            return await self._workflow_agent.run(request.sessionId, request.message, stored_profile, declarations)
+            workflow_started_at = perf_counter()
+            state = await self._workflow_agent.run(
+                request.sessionId, request.message, stored_profile, declarations
+            )
+            metrics.workflow_ms = (perf_counter() - workflow_started_at) * 1000
+            return state
         request_values = {
             name: getattr(request.userProfile, name)
             for name in request.userProfile.__class__.model_fields
@@ -181,6 +209,7 @@ class ChatService:
         fallback_reason: str | None = None
         if self._profile_extractor is not None:
             started_at = perf_counter()
+            metrics.profile_extraction_calls = 1
             try:
                 llm_patch = await self._profile_extractor.extract(request.message, stored_profile)
                 extraction_source = "llm"
@@ -194,6 +223,7 @@ class ChatService:
                 fallback_reason,
                 (perf_counter() - started_at) * 1000,
             )
+            metrics.profile_extraction_ms = (perf_counter() - started_at) * 1000
         else:
             logger.info("profile_extraction source=rule extracted_fields=%s fallback_reason=%s", sorted(rule_patch), None)
         graduation_date_patch = ProfileUpdateParser.graduation_date_overrides(request.message)
@@ -214,13 +244,19 @@ class ChatService:
                 **ProfileUpdateParser.flexible_insurance_overrides(request.message),
             }
         )
+        workflow_started_at = perf_counter()
+        workflow_timings: dict[str, float] = {}
         state = await self._workflow_agent.run(
             session_id=request.sessionId,
             message=request.message.strip(),
             user_profile=profile,
             material_declarations=declarations,
             policy_search_query=search_query,
+            timings=workflow_timings,
         )
+        metrics.workflow_ms = (perf_counter() - workflow_started_at) * 1000
+        metrics.realtime_search_ms = workflow_timings.get("realtime_search_ms", 0)
+        metrics.material_updated = state.materialDeclarations != declarations
         if self._policy_repository is not None:
             for candidate in state.candidatePolicies:
                 record = self._policy_repository.get_by_id(candidate.policyId)
@@ -241,39 +277,79 @@ class ChatService:
         await self._store.set_internal_profile(request.sessionId, request.userId, state.userProfile)
         return state
 
-    async def chat(self, request: ChatRequest) -> ChatData:
+    @staticmethod
+    def _log_request_timing(
+        trace_id: str | None,
+        timings: RequestTimings,
+        decision: FinalExplanationDecision,
+        final_explanation_ms: float,
+        total_ms: float,
+    ) -> None:
+        timing_logger.info(
+            "agent_request_timing trace_id=%s profile_extraction_ms=%d workflow_ms=%d "
+            "final_explanation_ms=%d realtime_search_ms=%d request_total_ms=%d "
+            "final_explanation_skipped=%s skip_reason=%s profile_extraction_calls=%d "
+            "final_explanation_calls=%d",
+            trace_id or "-",
+            timings.profile_extraction_ms,
+            timings.workflow_ms,
+            final_explanation_ms,
+            timings.realtime_search_ms,
+            total_ms,
+            not decision.generate,
+            decision.skip_reason.value,
+            timings.profile_extraction_calls,
+            timings.final_explanation_calls,
+        )
+
+    async def chat(self, request: ChatRequest, trace_id: str | None = None) -> ChatData:
         request_started_at = perf_counter()
-        state = await self._run_workflow(request)
-        user_message, messages = await self._messages(request, state)
-        reply = self._fallback_reply(state)
+        timings = RequestTimings()
+        state = await self._run_workflow(request, timings)
+        decision = FinalExplanationPolicy.decide(state, material_updated=timings.material_updated)
+        user_message = request.message.strip()
+        reply = self._fallback_reply(state, decision)
         explanation_started_at = perf_counter()
-        if not state.needFollowUp and state.domainIntent is not PolicyDomainIntent.OUT_OF_SCOPE:
+        if decision.generate:
+            timings.final_explanation_calls = 1
             try:
-                generated = await self._provider.complete(messages)
+                _, messages = await self._messages(request, state)
+                generated = await asyncio.wait_for(
+                    self._provider.complete(messages),
+                    timeout=self._final_explanation_timeout_seconds,
+                )
                 if self._may_use_llm_reply(state, generated):
                     reply = generated
+                    realtime_reply = self._realtime_reply(state)
+                    if realtime_reply:
+                        reply += "\n\n" + realtime_reply
             except Exception:
                 pass
         await self._store.append_exchange(
             request.sessionId, request.userId, user_message, reply
         )
-        logger.info(
-            "chat_timing final_explanation_ms=%d total_request_ms=%d",
+        self._log_request_timing(
+            trace_id, timings, decision,
             (perf_counter() - explanation_started_at) * 1000,
             (perf_counter() - request_started_at) * 1000,
         )
         return self._result(request, state, reply)
 
-    async def stream_chat(self, request: ChatRequest) -> AsyncIterator[ChatStreamEvent]:
+    async def stream_chat(self, request: ChatRequest, trace_id: str | None = None) -> AsyncIterator[ChatStreamEvent]:
         request_started_at = perf_counter()
-        state = await self._run_workflow(request)
-        user_message, messages = await self._messages(request, state)
+        timings = RequestTimings()
+        state = await self._run_workflow(request, timings)
+        decision = FinalExplanationPolicy.decide(state, material_updated=timings.material_updated)
+        user_message = request.message.strip()
         chunks: list[str] = []
         explanation_started_at = perf_counter()
-        if not state.needFollowUp and state.domainIntent is not PolicyDomainIntent.OUT_OF_SCOPE:
+        if decision.generate:
+            timings.final_explanation_calls = 1
             try:
-                async for chunk in self._provider.stream(messages):
-                    chunks.append(chunk)
+                _, messages = await self._messages(request, state)
+                async with asyncio.timeout(self._final_explanation_timeout_seconds):
+                    async for chunk in self._provider.stream(messages):
+                        chunks.append(chunk)
                 generated = "".join(chunks).strip()
                 if self._may_use_llm_reply(state, generated):
                     for chunk in chunks:
@@ -282,12 +358,16 @@ class ChatService:
                     chunks = []
             except Exception:
                 chunks = []
-        reply = "".join(chunks).strip() or self._fallback_reply(state)
+        reply = "".join(chunks).strip() or self._fallback_reply(state, decision)
+        if chunks:
+            realtime_reply = self._realtime_reply(state)
+            if realtime_reply:
+                reply += "\n\n" + realtime_reply
         await self._store.append_exchange(
             request.sessionId, request.userId, user_message, reply
         )
-        logger.info(
-            "chat_timing final_explanation_ms=%d total_request_ms=%d",
+        self._log_request_timing(
+            trace_id, timings, decision,
             (perf_counter() - explanation_started_at) * 1000,
             (perf_counter() - request_started_at) * 1000,
         )

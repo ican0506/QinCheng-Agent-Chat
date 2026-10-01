@@ -78,6 +78,20 @@ def payload(message: str = "你好") -> dict:
     }
 
 
+def policy_payload(message: str) -> dict:
+    data = payload(message)
+    data["userProfile"] = {
+        "city": "苏州市",
+        "education": "本科",
+        "graduationYear": 2025,
+        "graduationDate": "2025-06-20",
+        "employmentStatus": "创业中",
+        "socialInsuranceMonths": 12,
+        "businessRegistrationMonths": 12,
+    }
+    return data
+
+
 def test_chat_returns_formal_contract_and_trace_id() -> None:
     provider = RecordingProvider()
     client = TestClient(create_app(settings(), provider))
@@ -99,22 +113,23 @@ def test_chat_returns_formal_contract_and_trace_id() -> None:
         "policies", "eligibility", "plan", "materialResults",
     }
     assert data["sessionId"] == "session-12345678"
-    assert data["replyText"] == "你好，我可以和你一起梳理问题。"
+    assert data["replyText"]
     assert data["policies"] == []
     assert data["eligibility"] == []
+    assert provider.calls == []
 
 
 def test_second_turn_sends_server_side_history_to_provider() -> None:
     provider = RecordingProvider(["第一轮回答", "第二轮回答"])
     client = TestClient(create_app(settings(), provider))
 
-    assert client.post("/api/agent/chat", json=payload("第一轮问题")).status_code == 200
-    assert client.post("/api/agent/chat", json=payload("那第二步呢？")).status_code == 200
+    assert client.post("/api/agent/chat", json=policy_payload("我可能同时涉及哪些就业和创业政策？帮我比较一下")).status_code == 200
+    assert client.post("/api/agent/chat", json=policy_payload("请继续比较这些就业和创业政策的区别")).status_code == 200
 
     assert [(item["role"], item["content"]) for item in provider.calls[1][1:]] == [
-        ("user", "第一轮问题"),
+        ("user", "我可能同时涉及哪些就业和创业政策？帮我比较一下"),
         ("assistant", "第一轮回答"),
-        ("user", "那第二步呢？"),
+        ("user", "请继续比较这些就业和创业政策的区别"),
     ]
 
 
@@ -122,7 +137,7 @@ def test_normal_llm_streaming_emits_delta_then_done_and_saves_history() -> None:
     provider = StreamingProvider(["第二轮回答"])
     client = TestClient(create_app(settings(), provider))
 
-    response = client.post("/api/agent/chat/stream", json=payload("第一轮问题"))
+    response = client.post("/api/agent/chat/stream", json=policy_payload("我可能同时涉及哪些就业和创业政策？帮我比较一下"))
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
@@ -133,11 +148,11 @@ def test_normal_llm_streaming_emits_delta_then_done_and_saves_history() -> None:
     assert events[1][1] == {"text": "，第二段。"}
     assert events[2][1]["data"]["replyText"] == "第一段，第二段。"
 
-    assert client.post("/api/agent/chat", json=payload("继续")).status_code == 200
+    assert client.post("/api/agent/chat", json=policy_payload("请继续比较这些就业和创业政策的区别")).status_code == 200
     assert [(item["role"], item["content"]) for item in provider.calls[1][1:]] == [
-        ("user", "第一轮问题"),
+        ("user", "我可能同时涉及哪些就业和创业政策？帮我比较一下"),
         ("assistant", "第一段，第二段。"),
-        ("user", "继续"),
+        ("user", "请继续比较这些就业和创业政策的区别"),
     ]
 
 
