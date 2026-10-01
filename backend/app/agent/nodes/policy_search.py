@@ -9,6 +9,6 @@ class PolicySearchNode:
         self._tool = tool
 
     async def execute(self, state: GovernmentAgentState) -> GovernmentAgentState:
-        state.candidatePolicies = await self._tool.search(state.userProfile, state.userMessage)
+        state.candidatePolicies = await self._tool.search(state.userProfile, state.policySearchQuery or state.userMessage)
         state.stage = AgentStage.ELIGIBILITY_CHECKING
         return state

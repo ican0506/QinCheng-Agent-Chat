@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from app.agent.models import GovernmentAgentState
+from app.agent.models import AgentStage, GovernmentAgentState
+from app.services.policy_query_context import PolicyDomainIntent, PolicyDomainIntentDetector
 from app.agent.nodes.eligibility import EligibilityNode
 from app.agent.nodes.plan import PlanNode
 from app.agent.nodes.material_check import MaterialCheckNode
@@ -51,8 +52,11 @@ class WorkflowAgent:
             realtime_node,
         )
 
-    async def run(self, session_id: str, message: str, user_profile: UserProfile, material_declarations: dict[str, bool] | None = None) -> GovernmentAgentState:
-        state = GovernmentAgentState(sessionId=session_id, userMessage=message, userProfile=user_profile, materialDeclarations=material_declarations or {})
+    async def run(self, session_id: str, message: str, user_profile: UserProfile, material_declarations: dict[str, bool] | None = None, policy_search_query: str | None = None) -> GovernmentAgentState:
+        state = GovernmentAgentState(sessionId=session_id, userMessage=message, userProfile=user_profile, materialDeclarations=material_declarations or {}, policySearchQuery=policy_search_query, domainIntent=PolicyDomainIntentDetector.detect(message))
+        if state.domainIntent is PolicyDomainIntent.OUT_OF_SCOPE:
+            state.stage = AgentStage.COMPLETED
+            return state
         state = await self._profile_node.execute(state)
         if state.needFollowUp:
             return state

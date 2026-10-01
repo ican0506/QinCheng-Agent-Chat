@@ -17,6 +17,9 @@ from app.services.llm.base import LLMMessage, LLMProvider
 from app.stores.session_store import InMemorySessionStore
 from app.services.profile_update_parser import ProfileUpdateParser
 from app.services.llm_profile_extractor import LLMProfileExtractor, ProfileExtractionError
+from app.services.policy_query_context import PolicyDomainIntent, PolicyDomainIntentDetector, PolicyQueryContextResolver
+from app.policy.repository import PolicyRepository
+from app.policy.models import ApplicationStatus, ValidityStatus
 
 
 logger = logging.getLogger(__name__)
@@ -43,12 +46,13 @@ class ChatStreamEvent:
 
 
 class ChatService:
-    def __init__(self, provider: LLMProvider, store: InMemorySessionStore, workflow_agent: WorkflowAgent, profile_extractor: LLMProfileExtractor | None = None, current_date: date | None = None) -> None:
+    def __init__(self, provider: LLMProvider, store: InMemorySessionStore, workflow_agent: WorkflowAgent, profile_extractor: LLMProfileExtractor | None = None, current_date: date | None = None, policy_repository: PolicyRepository | None = None) -> None:
         self._provider = provider
         self._store = store
         self._workflow_agent = workflow_agent
         self._profile_extractor = profile_extractor
         self._current_date = current_date
+        self._policy_repository = policy_repository
 
     async def _messages(
         self, request: ChatRequest, state: GovernmentAgentState
@@ -115,33 +119,36 @@ class ChatService:
 
     @staticmethod
     def _local_fallback_reply(state: GovernmentAgentState) -> str:
+        if state.domainIntent is PolicyDomainIntent.OUT_OF_SCOPE:
+            return "当前助手主要支持高校毕业生就业创业政策咨询，暂不提供该主题的解答。"
         historical_or_closed_notice = ChatService._historical_or_closed_notice(state)
         if historical_or_closed_notice is not None:
             return historical_or_closed_notice
         if state.needFollowUp and state.followUpQuestions:
-            return f"已完成初步政策分析，还需要补充以下信息后才能继续判断：{'；'.join(state.followUpQuestions)}"
-        statuses = {item.overallStatus.value for item in state.eligibilityResults}
-        if "MANUAL_REVIEW" in statuses:
-            return "部分条件需要经办机构或人工进一步核验，请查看右侧工作台中的核验项、材料清单和办理步骤。"
-        if "PASS" in statuses:
-            return "已匹配相关政策，并完成资格辅助判断和办理路径规划。请查看右侧工作台中的政策依据、材料清单和办理步骤。"
-        if not state.candidatePolicies:
-            return "暂未找到与当前信息高度相关的政策，可以补充地区、毕业时间或就业创业情况后继续查询。"
-        return "已完成政策匹配和初步资格辅助判断，请查看右侧工作台了解具体结果。"
+            reply = f"已完成初步政策分析，还需要补充以下信息后才能继续判断：{'；'.join(state.followUpQuestions)}"
+        else:
+            statuses = {item.overallStatus.value for item in state.eligibilityResults if item.policyId not in state.policyReferenceNotices}
+            if "MANUAL_REVIEW" in statuses:
+                reply = "部分条件需要经办机构或人工进一步核验，请查看右侧工作台中的核验项、材料清单和办理步骤。"
+            elif "PASS" in statuses:
+                reply = "已匹配相关政策，并完成资格辅助判断和办理路径规划。请查看右侧工作台中的政策依据、材料清单和办理步骤。"
+            elif not state.candidatePolicies:
+                reply = "暂未找到与当前信息高度相关的政策，可以补充地区、毕业时间或就业创业情况后继续查询。"
+            else:
+                reply = "已完成政策匹配和初步资格辅助判断，请查看右侧工作台了解具体结果。"
+        for candidate in state.candidatePolicies:
+            notice = state.policyReferenceNotices.get(candidate.policyId)
+            if notice:
+                reply += f"\n\n《{candidate.name}》：{notice}"
+        return reply
 
     @staticmethod
     def _historical_or_closed_notice(state: GovernmentAgentState) -> str | None:
-        historical = any(
-            any(condition.conditionId == "policy-validity" for condition in result.conditionResults)
-            for result in state.eligibilityResults
-        )
-        closed = any("申报窗口已关闭" in result.summary for result in state.eligibilityResults)
-        if historical and closed:
-            return "当前知识库中的该记录为历史申报通知，申报窗口已结束。请关注苏州市人社部门后续发布的最新年度申报安排。"
-        if historical:
-            return "当前知识库中的该记录为历史政策依据，不能直接作为当前申请依据。请关注苏州市人社部门后续发布的最新年度申报安排。"
-        if closed:
-            return "该政策当前申报窗口已结束。请关注苏州市人社部门后续发布的最新年度申报安排。"
+        # 只有全部候选都属于历史/关闭参考，才采用整轮历史回复。
+        if state.candidatePolicies and all(p.policyId in state.policyReferenceNotices for p in state.candidatePolicies):
+            if len(state.candidatePolicies) == 1:
+                return state.policyReferenceNotices[state.candidatePolicies[0].policyId]
+            return "\n\n".join(f"《{p.name}》：{state.policyReferenceNotices[p.policyId]}" for p in state.candidatePolicies)
         return None
 
     @staticmethod
@@ -149,7 +156,7 @@ class ChatService:
         # 第一阶段所有外部检索回复使用确定性证据段，避免自由文本改变资格或窗口事实。
         if state.realtimeSearchStatus is not RealtimeSearchStatus.NOT_TRIGGERED:
             return False
-        if ChatService._historical_or_closed_notice(state) is not None:
+        if state.domainIntent is PolicyDomainIntent.OUT_OF_SCOPE or state.policyReferenceNotices:
             return False
         if state.candidatePolicies or state.needFollowUp:
             return bool(state.candidatePolicies) and not state.needFollowUp
@@ -158,6 +165,11 @@ class ChatService:
     async def _run_workflow(self, request: ChatRequest) -> GovernmentAgentState:
         declarations = await self._store.get_material_declarations(request.sessionId, request.userId)
         stored_profile = await self._store.get_internal_profile(request.sessionId, request.userId)
+        previous_query = await self._store.get_policy_query_context(request.sessionId, request.userId)
+        query_context, search_query = PolicyQueryContextResolver.resolve(request.message, previous_query)
+        await self._store.set_policy_query_context(request.sessionId, request.userId, query_context)
+        if PolicyDomainIntentDetector.detect(request.message) is PolicyDomainIntent.OUT_OF_SCOPE:
+            return await self._workflow_agent.run(request.sessionId, request.message, stored_profile, declarations)
         request_values = {
             name: getattr(request.userProfile, name)
             for name in request.userProfile.__class__.model_fields
@@ -199,6 +211,7 @@ class ChatService:
                 **graduation_date_patch,
                 **relative_time_patch,
                 **deterministic_intent_patch,
+                **ProfileUpdateParser.flexible_insurance_overrides(request.message),
             }
         )
         state = await self._workflow_agent.run(
@@ -206,7 +219,24 @@ class ChatService:
             message=request.message.strip(),
             user_profile=profile,
             material_declarations=declarations,
+            policy_search_query=search_query,
         )
+        if self._policy_repository is not None:
+            for candidate in state.candidatePolicies:
+                record = self._policy_repository.get_by_id(candidate.policyId)
+                if record is None:
+                    continue
+                historical = record.validityStatus in {ValidityStatus.HISTORICAL, ValidityStatus.EXPIRED}
+                closed = record.applicationStatus is ApplicationStatus.CLOSED
+                if historical and closed:
+                    notice = "当前知识库中的该记录为历史申报通知，申报窗口已结束。请关注苏州市人社部门后续发布的最新年度申报安排。"
+                elif historical:
+                    notice = "当前知识库中的该记录为历史政策依据，不能直接作为当前申请依据。请关注苏州市人社部门后续发布的最新年度申报安排。"
+                elif closed:
+                    notice = "该政策当前申报窗口已结束。请关注苏州市人社部门后续发布的最新年度申报安排。"
+                else:
+                    continue
+                state.policyReferenceNotices[candidate.policyId] = notice
         await self._store.set_material_declarations(request.sessionId, request.userId, state.materialDeclarations)
         await self._store.set_internal_profile(request.sessionId, request.userId, state.userProfile)
         return state
@@ -217,7 +247,7 @@ class ChatService:
         user_message, messages = await self._messages(request, state)
         reply = self._fallback_reply(state)
         explanation_started_at = perf_counter()
-        if not state.needFollowUp:
+        if not state.needFollowUp and state.domainIntent is not PolicyDomainIntent.OUT_OF_SCOPE:
             try:
                 generated = await self._provider.complete(messages)
                 if self._may_use_llm_reply(state, generated):
@@ -240,7 +270,7 @@ class ChatService:
         user_message, messages = await self._messages(request, state)
         chunks: list[str] = []
         explanation_started_at = perf_counter()
-        if not state.needFollowUp:
+        if not state.needFollowUp and state.domainIntent is not PolicyDomainIntent.OUT_OF_SCOPE:
             try:
                 async for chunk in self._provider.stream(messages):
                     chunks.append(chunk)

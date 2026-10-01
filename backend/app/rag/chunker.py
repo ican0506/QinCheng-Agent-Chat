@@ -30,6 +30,7 @@ class MarkdownPolicyChunker:
                     chunkId=f"{document.policyId}:{len(chunks) + 1}",
                     heading=heading,
                     chunkText=section_part,
+                    applicationStatus=document.applicationStatus,
                 ))
         return chunks
 

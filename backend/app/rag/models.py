@@ -16,6 +16,7 @@ class RagDocument:
     topics: tuple[str, ...]
     targetGroups: tuple[str, ...]
     markdown: str
+    applicationStatus: str = "UNKNOWN"
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ class RagChunk:
     chunkId: str
     heading: str
     chunkText: str
+    applicationStatus: str = "UNKNOWN"
 
 
 @dataclass(frozen=True)
