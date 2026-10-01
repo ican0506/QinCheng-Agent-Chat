@@ -36,7 +36,7 @@ async def chat(
 ) -> ApiResponse[ChatData]:
     trace_id = resolve_trace_id(x_trace_id)
     request.state.trace_id = trace_id
-    data = await request.app.state.chat_service.chat(payload)
+    data = await request.app.state.chat_service.chat(payload, trace_id=trace_id)
     return ApiResponse(code=0, message="success", traceId=trace_id, data=data)
 
 
@@ -51,7 +51,7 @@ async def stream_chat(
 
     async def events() -> AsyncIterator[str]:
         try:
-            async for item in request.app.state.chat_service.stream_chat(payload):
+            async for item in request.app.state.chat_service.stream_chat(payload, trace_id=trace_id):
                 if item.kind == "delta":
                     yield sse_event("delta", {"text": item.text})
                 elif item.data is not None:

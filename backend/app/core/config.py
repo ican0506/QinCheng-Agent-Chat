@@ -19,6 +19,7 @@ class Settings:
     session_limit: int
     profile_extraction_enabled: bool = False
     profile_extraction_timeout_seconds: float = 5
+    final_explanation_timeout_seconds: float = 12
     realtime_policy_search_enabled: bool = False
     realtime_policy_search_provider: str = ''
     realtime_policy_search_api_key: str = ''
@@ -54,6 +55,7 @@ class Settings:
             session_limit=int(os.getenv("SESSION_LIMIT", "1000")),
             profile_extraction_enabled=os.getenv("PROFILE_EXTRACTION_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
             profile_extraction_timeout_seconds=float(os.getenv("PROFILE_EXTRACTION_TIMEOUT_SECONDS", "5")),
+            final_explanation_timeout_seconds=max(0.001, float(os.getenv("FINAL_EXPLANATION_TIMEOUT_SECONDS", "12"))),
             realtime_policy_search_enabled=os.getenv('REALTIME_POLICY_SEARCH_ENABLED', 'false').lower() in {'true','1','yes','on'},
             realtime_policy_search_provider=os.getenv('REALTIME_POLICY_SEARCH_PROVIDER', ''),
             realtime_policy_search_api_key=os.getenv('REALTIME_POLICY_SEARCH_API_KEY', ''),
