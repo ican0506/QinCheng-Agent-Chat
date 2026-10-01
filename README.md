@@ -6,6 +6,18 @@
 
 ## 当前能力
 
+实时政策检索阶段：已具备实时政策检索 Tool 架构与 Provider 接口；默认未配置真实搜索 Provider 时不会实际联网。
+
+时效性问题（最新、目前、今年、申报窗口、截止时间等）及明确历史通知查询，由 `FreshnessIntentDetector` 识别，在本地政策检索后执行独立 `RealtimePolicySearchNode`。普通条件咨询继续使用本地知识库。
+
+`OfficialRealtimePolicySearchTool` 只接受 HTTPS 官方 allowlist 来源，默认域名为 `suzhou.gov.cn`、`hrss.suzhou.gov.cn`。结果按保守规范化 URL 去重，结合关键词、发布日期与本地关联排序。sourceUrl 完全一致或规范化政策名称完全一致且唯一时才关联本地 policyId。
+
+实时证据与本地 `PolicyCandidate` 分开保存。实时结果不参与资格 PASS/FAIL，也不修改本地政策、窗口、规则、材料或计划；新发现通知必须完成结构化核验后才能进入规则引擎。当前触发实时查询的最终回复采用确定性证据说明，保留标题、官方 URL 和存在的发布日期，避免模型扩写资格、金额或截止日期。
+
+当前提供厂商无关 `RealtimeSearchProvider` 协议、测试用 Fake Provider 和默认 Disabled Provider。未配置服务、查询无结果、超时/异常分别提示；后续流程继续使用本地政策库。配置位于 `backend/.env.example`，搜索 API Key 与 LLM Key 分开且示例为空。仅设置 provider 名称或 API Key 不会创建联网能力；需先实现真实 Provider 并在应用组装处选择它。
+
+本阶段不抓取网页正文、下载 PDF 或执行网页脚本，也未增加第三方依赖、缓存、数据库或前端实时证据面板。日志只记录触发状态、Provider 类型、结果数量和 `realtime_search_ms`，不记录用户画像、Key 或网页正文。
+
 - 用户画像采用 LLM 结构化信息抽取，并通过 Pydantic/确定性规则进行字段校验和归一化；模型不可用时回退到本地规则解析器；
 - 苏州市高校毕业生就业创业政策检索；
 - 已核验官方政策原文知识库检索与来源追溯；

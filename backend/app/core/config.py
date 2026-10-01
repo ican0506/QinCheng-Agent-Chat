@@ -19,6 +19,12 @@ class Settings:
     session_limit: int
     profile_extraction_enabled: bool = False
     profile_extraction_timeout_seconds: float = 5
+    realtime_policy_search_enabled: bool = False
+    realtime_policy_search_provider: str = ''
+    realtime_policy_search_api_key: str = ''
+    realtime_policy_allowed_domains: tuple[str, ...] = ('suzhou.gov.cn', 'hrss.suzhou.gov.cn')
+    realtime_policy_search_timeout_seconds: float = 8
+    realtime_policy_search_max_results: int = 5
 
     @property
     def llm_configured(self) -> bool:
@@ -48,4 +54,10 @@ class Settings:
             session_limit=int(os.getenv("SESSION_LIMIT", "1000")),
             profile_extraction_enabled=os.getenv("PROFILE_EXTRACTION_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
             profile_extraction_timeout_seconds=float(os.getenv("PROFILE_EXTRACTION_TIMEOUT_SECONDS", "5")),
+            realtime_policy_search_enabled=os.getenv('REALTIME_POLICY_SEARCH_ENABLED', 'false').lower() in {'true','1','yes','on'},
+            realtime_policy_search_provider=os.getenv('REALTIME_POLICY_SEARCH_PROVIDER', ''),
+            realtime_policy_search_api_key=os.getenv('REALTIME_POLICY_SEARCH_API_KEY', ''),
+            realtime_policy_allowed_domains=tuple(d.strip().lower() for d in os.getenv('REALTIME_POLICY_ALLOWED_DOMAINS', 'suzhou.gov.cn,hrss.suzhou.gov.cn').split(',') if d.strip()),
+            realtime_policy_search_timeout_seconds=max(0.001, float(os.getenv('REALTIME_POLICY_SEARCH_TIMEOUT_SECONDS', '8'))),
+            realtime_policy_search_max_results=max(1, int(os.getenv('REALTIME_POLICY_SEARCH_MAX_RESULTS', '5'))),
         )

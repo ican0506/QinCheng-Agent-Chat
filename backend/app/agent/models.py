@@ -5,6 +5,7 @@ from enum import Enum
 from pydantic import BaseModel, Field
 
 from app.models.chat import MaterialCheckResult, UserProfile
+from app.realtime_policy.models import RealtimePolicyHit, RealtimeSearchStatus
 
 
 class AgentStage(str, Enum):
@@ -121,3 +122,5 @@ class GovernmentAgentState(BaseModel):
     followUpQuestions: list[str] = Field(default_factory=list)
     nextAction: str | None = None
     errors: list[str] = Field(default_factory=list)
+    realtimePolicyHits: list[RealtimePolicyHit] = Field(default_factory=list)
+    realtimeSearchStatus: RealtimeSearchStatus = RealtimeSearchStatus.NOT_TRIGGERED

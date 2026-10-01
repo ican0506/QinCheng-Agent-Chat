@@ -11,6 +11,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.agent.workflow import WorkflowAgent
+from app.agent.nodes.realtime_policy_search import RealtimePolicySearchNode
+from app.realtime_policy.provider import RealtimeSearchProvider, DisabledRealtimeSearchProvider
+from app.realtime_policy.tool import OfficialRealtimePolicySearchTool
 from app.agent.tools.local_policy import LocalPolicySearchTool
 from app.agent.tools.rag_policy import RagPolicySearchTool
 from app.agent.tools.plan import DeterministicPlanTool
@@ -42,6 +45,7 @@ def _trace_id(request: Request) -> str:
 def create_app(
     settings: Settings | None = None,
     provider: LLMProvider | None = None,
+    realtime_provider: RealtimeSearchProvider | None = None,
 ) -> FastAPI:
     active_settings = settings or Settings.from_env()
     active_provider = provider
@@ -80,6 +84,12 @@ def create_app(
         policy_search_tool,
         DeterministicPolicyCompareTool(policy_repository, policy_relation_repository),
         DeterministicPlanTool(policy_repository),
+        RealtimePolicySearchNode(OfficialRealtimePolicySearchTool(
+            realtime_provider if realtime_provider is not None else DisabledRealtimeSearchProvider(),
+            policy_repository, list(active_settings.realtime_policy_allowed_domains),
+            timeout_seconds=active_settings.realtime_policy_search_timeout_seconds,
+            max_results=active_settings.realtime_policy_search_max_results,
+        ), enabled=active_settings.realtime_policy_search_enabled),
     )
     application = FastAPI(
         title="应届毕业生就业创业政策 Agent - Chat 模块",
