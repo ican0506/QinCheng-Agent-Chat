@@ -37,7 +37,7 @@ class ProfileUpdateParser:
             result["businessRegistrationMonths"] = int(registration.group(1))
         elif re.search(r"(?:公司|企业)?.{0,4}?(?:注册|登记).{0,8}?(?:一|1)年", message):
             result["businessRegistrationMonths"] = 12
-        if "本市户籍" in message or "苏州户籍" in message:
+        if re.search(r"本市户籍|苏州市?户籍", message):
             result["residencyRegistration"] = "本市户籍"
         self_reported_unemployment = bool(
             re.search(r"(?:我|本人)(?:目前|现在)?(?:还在|正处于|处于)?待业(?:状态)?", message)
@@ -53,6 +53,8 @@ class ProfileUpdateParser:
 
         result.update(ProfileUpdateParser.deterministic_intent_overrides(message))
         result.update(ProfileUpdateParser.flexible_insurance_overrides(message))
+        # 否定纠正必须最后覆盖前面由关键词子串得到的正向结果。
+        result.update(ProfileUpdateParser.employment_status_overrides(message))
         return result
 
     @staticmethod
@@ -62,6 +64,7 @@ class ProfileUpdateParser:
             **ProfileUpdateParser.relative_time_overrides(message, current_date),
             **ProfileUpdateParser.deterministic_intent_overrides(message),
             **ProfileUpdateParser.flexible_insurance_overrides(message),
+            **ProfileUpdateParser.employment_status_overrides(message),
         }
 
     @staticmethod
@@ -120,10 +123,26 @@ class ProfileUpdateParser:
     def flexible_insurance_overrides(message: str) -> dict[str, object]:
         """只记录参保陈述，不把政策问题当成已参保事实。"""
         for clause in re.split(r"[，,。；;！!？?]", message):
-            if re.search(r"(?:没有|未|不)(?:按|以)?灵活就业(?:身份)?(?:参保|交社保|缴社保)", clause):
+            if re.search(
+                r"(?:没有|未|不(?:是|属于)?)(?:按|以)?灵活就业"
+                r"(?:身份|人员)?(?:参保|交社保|缴社保)?",
+                clause,
+            ):
                 return {"flexibleEmploymentInsurance": False}
             if re.search(r"什么|是否|怎么|如何|能否|能申请|可以|吗", clause):
                 continue
             if re.search(r"灵活就业(?:身份)?(?:参保|交社保|缴社保)", clause):
                 return {"flexibleEmploymentInsurance": True}
+        return {}
+
+    @staticmethod
+    def employment_status_overrides(message: str) -> dict[str, object]:
+        """处理明确的就业状态纠正；不把否定短语中的“未就业”当成正向事实。"""
+        if re.search(r"已经就业|已就业|已经找到工作|找到工作了|目前在职|现在在职", message):
+            return {"employmentStatus": "已就业", "unemploymentStatus": None}
+        if re.search(
+            r"不是未就业|不是待就业|已经不是待业状态|不再(?:未就业|待就业|待业)",
+            message,
+        ):
+            return {"employmentStatus": None, "unemploymentStatus": None}
         return {}

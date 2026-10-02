@@ -5,7 +5,7 @@ from enum import Enum
 
 from app.agent.models import GovernmentAgentState
 from app.realtime_policy.models import RealtimeSearchStatus
-from app.services.policy_query_context import PolicyDomainIntent
+from app.services.policy_query_context import PolicyDomainIntent, PolicyQueryMode
 
 
 class FinalExplanationSkipReason(str, Enum):
@@ -16,6 +16,7 @@ class FinalExplanationSkipReason(str, Enum):
     NO_POLICY = "NO_POLICY"
     MATERIAL_UPDATE = "MATERIAL_UPDATE"
     REALTIME_STATUS_ONLY = "REALTIME_STATUS_ONLY"
+    FACT_QUERY = "FACT_QUERY"
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,12 @@ class FinalExplanationPolicy:
     ) -> FinalExplanationDecision:
         if state.domainIntent is PolicyDomainIntent.OUT_OF_SCOPE:
             return FinalExplanationDecision(False, FinalExplanationSkipReason.OUT_OF_SCOPE)
+        base_profile_complete = all(
+            getattr(state.userProfile, field) not in (None, "")
+            for field in ("city", "education", "graduationYear", "employmentStatus")
+        )
+        if state.queryMode is PolicyQueryMode.FACT_QUERY and not base_profile_complete:
+            return FinalExplanationDecision(False, FinalExplanationSkipReason.FACT_QUERY)
         if material_updated:
             return FinalExplanationDecision(False, FinalExplanationSkipReason.MATERIAL_UPDATE)
         if state.candidatePolicies and all(
