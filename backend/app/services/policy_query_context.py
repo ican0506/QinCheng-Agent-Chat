@@ -13,6 +13,54 @@ class PolicyDomainIntent(str, Enum):
     UNCERTAIN = "UNCERTAIN"
 
 
+class PolicyQueryMode(str, Enum):
+    FACT_QUERY = "FACT_QUERY"
+    PERSONALIZED_QUERY = "PERSONALIZED_QUERY"
+    PROFILE_UPDATE = "PROFILE_UPDATE"
+    OUT_OF_SCOPE = "OUT_OF_SCOPE"
+    UNCERTAIN = "UNCERTAIN"
+
+
+class PolicyQueryModeDetector:
+    @staticmethod
+    def detect(message: str) -> PolicyQueryMode:
+        if PolicyDomainIntentDetector.detect(message) is PolicyDomainIntent.OUT_OF_SCOPE:
+            return PolicyQueryMode.OUT_OF_SCOPE
+
+        # “我是否符合/能申请什么”依赖个人画像，不能按政策事实问答处理。
+        if re.search(
+            r"根据我的情况|我(?:现在)?能申请什么|我符合|我能否|我能不能|我可以(?:申请|申领)|"
+            r"我.*(?:符合|能否|能不能|可以).*(?:申请|申领|领取|拿到)|"
+            r"我想申请|我要申请|帮我申请",
+            message,
+        ):
+            return PolicyQueryMode.PERSONALIZED_QUERY
+
+        # 明确询问政策本身的条件、材料、流程、窗口或官方通知，不要求先补齐画像。
+        specific_policy = bool(re.search(
+            r"一次性创业补贴|创业(?:社会保险|社保)补贴|灵活就业(?:社会保险|社保)补贴|"
+            r"求职创业补贴|就业见习",
+            message,
+        ))
+        fact_signal = bool(re.search(
+            r"条件|材料|流程|办理|申报时间|截止|什么时候|现在还能申请|现在还能申领|窗口开了吗",
+            message,
+        ))
+        if (
+            (specific_policy and fact_signal)
+            or re.search(r"这个政策.*(?:条件|材料|流程|截止)", message)
+            or re.search(r"历史(?:政策|通知|申报)|往年.*(?:通知|申报)", message)
+            or (specific_policy and re.search(r"只看|想看|查询", message))
+        ):
+            return PolicyQueryMode.FACT_QUERY
+
+        if ProfileOnlyUpdateDetector.detect(message):
+            return PolicyQueryMode.PROFILE_UPDATE
+        if PolicyDomainIntentDetector.detect(message) is PolicyDomainIntent.IN_SCOPE:
+            return PolicyQueryMode.UNCERTAIN
+        return PolicyQueryMode.UNCERTAIN
+
+
 class QueryTemporalIntent(str, Enum):
     CURRENT = "CURRENT"
     HISTORICAL = "HISTORICAL"

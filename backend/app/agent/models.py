@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.models.chat import MaterialCheckResult, UserProfile
 from app.realtime_policy.models import RealtimePolicyHit, RealtimeSearchStatus
-from app.services.policy_query_context import PolicyDomainIntent
+from app.services.policy_query_context import PolicyDomainIntent, PolicyQueryMode
 
 
 class AgentStage(str, Enum):
@@ -114,6 +114,7 @@ class GovernmentAgentState(BaseModel):
     userProfile: UserProfile
     policySearchQuery: str | None = None
     domainIntent: PolicyDomainIntent = PolicyDomainIntent.UNCERTAIN
+    queryMode: PolicyQueryMode = PolicyQueryMode.UNCERTAIN
     policyReferenceNotices: dict[str, str] = Field(default_factory=dict)
     stage: AgentStage = AgentStage.PROFILE_COLLECTING
     candidatePolicies: list[PolicyCandidate] = Field(default_factory=list)

@@ -18,7 +18,12 @@ from app.services.llm.base import LLMMessage, LLMProvider
 from app.stores.session_store import InMemorySessionStore
 from app.services.profile_update_parser import ProfileUpdateParser
 from app.services.llm_profile_extractor import LLMProfileExtractor, ProfileExtractionError
-from app.services.policy_query_context import PolicyDomainIntent, PolicyDomainIntentDetector, PolicyQueryContextResolver
+from app.services.policy_query_context import (
+    PolicyDomainIntent,
+    PolicyDomainIntentDetector,
+    PolicyQueryContextResolver,
+    PolicyQueryMode,
+)
 from app.policy.repository import PolicyRepository
 from app.policy.models import ApplicationStatus, ValidityStatus
 from app.services.final_explanation_policy import (
@@ -147,6 +152,19 @@ class ChatService:
         historical_or_closed_notice = ChatService._historical_or_closed_notice(state)
         if historical_or_closed_notice is not None:
             return historical_or_closed_notice
+        if state.queryMode is PolicyQueryMode.FACT_QUERY:
+            if not state.candidatePolicies:
+                return "暂未在本地已核验政策库中找到与该问题高度相关的政策。"
+            lines = ["已找到以下本地已核验政策信息："]
+            for candidate in state.candidatePolicies:
+                lines.append(f"《{candidate.name}》")
+                if candidate.conditions:
+                    lines.append("申请条件：" + "；".join(candidate.conditions))
+                if candidate.requiredMaterials:
+                    lines.append("申请材料：" + "；".join(candidate.requiredMaterials))
+                lines.append("官方来源：" + candidate.sourceUrl)
+            lines.append("以上为政策事实说明，不代表对您个人资格的判断。")
+            return "\n".join(lines)
         if state.needFollowUp and state.followUpQuestions:
             reply = f"已完成初步政策分析，还需要补充以下信息后才能继续判断：{'；'.join(state.followUpQuestions)}"
         else:
@@ -242,6 +260,7 @@ class ChatService:
                 **relative_time_patch,
                 **deterministic_intent_patch,
                 **ProfileUpdateParser.flexible_insurance_overrides(request.message),
+                **ProfileUpdateParser.employment_status_overrides(request.message),
             }
         )
         workflow_started_at = perf_counter()

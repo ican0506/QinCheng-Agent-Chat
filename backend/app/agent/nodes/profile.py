@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.agent.models import AgentStage, GovernmentAgentState
+from app.services.policy_query_context import PolicyQueryMode
 
 
 class ProfileNode:
@@ -12,6 +13,12 @@ class ProfileNode:
     }
 
     async def execute(self, state: GovernmentAgentState) -> GovernmentAgentState:
+        if state.queryMode is PolicyQueryMode.FACT_QUERY:
+            state.needFollowUp = False
+            state.followUpQuestions = []
+            state.nextAction = None
+            state.stage = AgentStage.POLICY_SEARCHING
+            return state
         missing = [field for field in self._questions if getattr(state.userProfile, field) in (None, "")]
         state.stage = AgentStage.PROFILE_COLLECTING
         if missing:
