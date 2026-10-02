@@ -24,6 +24,17 @@
 - 中文日期：`2025年6月20日`；
 - “待业”等自然语言状态归一。
 
+系统也支持明确的否定式纠正，例如“不是未就业”“不是待就业”“已经不是待业状态”“不是灵活就业参保”“没有按灵活就业参保”。明确的 `false` 可以覆盖历史 `true`；“不是未就业”不会被武断推断为“已就业”，在用户没有说明新的就业状态时，系统会清除无法确认的旧状态，而不是编造新状态。
+
+### 政策事实查询与个性化资格查询
+
+系统会先进行轻量、确定性的 Query Mode / Domain Intent 识别，区分“问政策本身”和“问我是否符合”。
+
+- **政策事实查询（FACT_QUERY）**：例如“创业社会保险补贴需要什么条件？”、“苏州创业社会保险补贴现在还能申请吗？”。这类问题无需先补齐城市、学历、毕业年份和就业状态，即可进入本地政策检索；涉及当前性或历史官方通知时，可按需触发 Tavily 实时检索。
+- **个性化资格查询（PERSONALIZED_QUERY）**：例如“我符合创业社会保险补贴吗？”、“根据我的情况我能申请什么？”。这类问题继续执行画像补充与 `RuleEligibilityTool`；信息不足时保持 `UNKNOWN` 并生成 Follow-up。
+
+允许直接查询政策事实，不等于跳过规则引擎判断用户资格。事实查询在画像不足时只说明结构化政策事实与官方证据，不输出“您符合”或“您不符合”的个性化结论。
+
 ### 政策检索与证据
 
 项目采用两层政策信息来源：
@@ -45,10 +56,10 @@
 ```mermaid
 flowchart TD
     U[用户] --> C[Chat API / SSE]
-    C --> P[Profile Parsing]
-    P --> Q[Policy Query Context]
-    Q --> W[WorkflowAgent]
-    W --> R[Local RAG Policy Search]
+    C --> Q[Query Mode Detection / Query Routing]
+    Q -->|OUT_OF_SCOPE| X[Final Explanation / Fallback]
+    Q --> P[ProfileNode]
+    P --> R[Local RAG Policy Search]
     R --> RT[Realtime Policy Search]
     RT --> E[Rule Eligibility]
     RT --> RE[Realtime Evidence]
@@ -77,7 +88,9 @@ flowchart TD
 生产链路为：
 
 ```text
-ProfileNode
+用户请求
+  → Query Mode / Domain Intent
+  → ProfileNode
   → PolicySearchNode（RagPolicySearchTool）
   → RealtimePolicySearchNode（按需）
   → EligibilityNode（RuleEligibilityTool）
@@ -87,7 +100,9 @@ ProfileNode
   → Final Explanation / Deterministic Fallback
 ```
 
-- `ProfileNode` 在核心画像不足时生成有限的 Follow-up，并提前停止后续 Workflow；
+- `FACT_QUERY` 可以穿过 `ProfileNode` 的完整画像门槛，先查询本地政策事实，并在需要时查询实时官方信息；画像不足时不进行个性化资格结论；
+- `PERSONALIZED_QUERY` 仍在必要画像缺失时生成有限的 Follow-up，并提前停止后续个性化判断；
+- `OUT_OF_SCOPE` 直接分流，不进入政策检索、画像追问或实时搜索；
 - `RagPolicySearchTool` 负责本地政策召回和原文 evidence，异常时回退 `LocalPolicySearchTool`；
 - `RealtimePolicySearchNode` 只在明确当前性或历史官方查询中运行，并非每次请求都联网；
 - `RuleEligibilityTool` 是资格判断的唯一确定性来源；
@@ -131,6 +146,14 @@ Markdown 标题优先切分
 
 `policy_relations.json` 当前保持空关系集合：现有政策没有足够官方依据支持 `MUTEX` 或 `PREREQUISITE`，项目不会为了展示效果制造政策关系。
 
+### 政策方向意图约束
+
+本地检索不会只依赖 RAG 相关性分数，还会结合用户明确意图和政策结构化元数据进行确定性约束。
+
+- 用户明确“正在创业 / 准备创业”，且没有表达灵活就业参保时，纯灵活就业政策不会仅因“社保”文本相似而被错误召回；
+- 用户明确“我不是创业，我只是按灵活就业交社保”时，创业方向退出，灵活就业方向进入评估；
+- 用户明确同时表达创业与灵活就业参保时，两个方向可以同时保留。
+
 ## 实时官方政策检索
 
 项目已接入 `TavilyRealtimeSearchProvider`，并完成真实联网验证。实时检索主要服务于：
@@ -165,6 +188,12 @@ Provider 请求时使用 domain restriction；返回结果还会再次经过本�
 - “毕业日期是2026年6月20日”。
 
 这可以避免无意义的实时调用和额外延迟。
+
+### 历史通知排序
+
+明确历史查询会在 Tavily 原始结果之上进行确定性重排，综合目标届别、政策主题、申报/通知/截止等正式语义，以及与本地 `PolicyRecord` 的可靠关联。
+
+例如“我想看2026届求职创业补贴之前的申报通知”会优先展示对应 2026 届的正式申报通知；2027 届通知、泛化就业工作通知、栏目页或校友分享页可以保留为弱相关补充，但不会优先于明确匹配结果。若网页标题没有写届别、但官方 URL 可可靠关联本地 2026 届记录，仍会得到优先排序。
 
 ### 与资格判断的边界
 
@@ -259,6 +288,7 @@ NOTICE
 
 Final Explanation LLM 并非每次请求都调用。以下确定性场景可以直接跳过：
 
+- 画像不足的 `FACT_QUERY`；
 - `OUT_OF_SCOPE`；
 - `FOLLOW_UP`；
 - `HISTORICAL_ONLY`；
@@ -352,16 +382,74 @@ npm run build
 
 当前验证基线：
 
-- Backend：`247 passed`；
+- Backend：`259 passed`；
 - Workspace tests：通过；
 - TypeScript typecheck：通过；
 - Frontend build：通过。
 
 Realtime / Provider 测试已覆盖 Tavily 正常响应、timeout、401/403、429、5xx、非法响应、官方域名过滤、Provider 装配和调用次数；同时覆盖普通画像与 OUT_OF_SCOPE 不调用实时 Provider。
 
+## 当前 RC 状态
+
+当前比赛 RC 的验证基线为：
+
+- Backend：`259 passed`；
+- Frontend workspace tests、typecheck、build：通过；
+- Competition RC：P0 为 0，P1 为 0。
+
+真实浏览器已回归政策事实查询、当前政策 + Tavily、个性化资格 Follow-up、完整创业画像、历史通知、否定式画像纠正、Session 隔离、Material READY、OUT_OF_SCOPE 与 Prompt Injection。当前比赛 RC 未发现阻断级 P0/P1；仍可能存在不阻断主链路的 P2，项目不宣称“零 Bug”。
+
 ## 典型演示场景
 
-### 1. 相对年份与 Follow-up
+### 1. 政策条件事实查询
+
+输入：
+
+> 创业社会保险补贴需要什么条件？
+
+展示 `FACT_QUERY`、无需先补完整画像，以及本地已核验政策事实查询。
+
+### 2. 当前政策实时查询
+
+输入：
+
+> 苏州创业社会保险补贴现在还能申请吗？
+
+展示 `FACT_QUERY`、Tavily 实时官方搜索、当前状态查询，以及实时 evidence 与资格判断隔离。
+
+### 3. 个性化资格 Follow-up
+
+输入：
+
+> 我符合创业社会保险补贴吗？
+
+展示 `PERSONALIZED_QUERY`、Profile Follow-up 与 `RuleEligibilityTool`。
+
+### 4. 完整创业画像
+
+输入：
+
+> 我在苏州，本科，2025年6月20日毕业，目前创业中，准备创业，连续缴纳社保12个月，公司注册12个月
+
+展示精确画像、创业政策收敛、`PASS`、材料清单和办理计划。
+
+### 5. 灵活就业意图收敛
+
+输入：
+
+> 我不是创业，我只是自己按灵活就业交社保
+
+展示明确否定创业、灵活就业政策收敛和确定性意图过滤。
+
+### 6. 历史申报通知
+
+输入：
+
+> 我想看2026届求职创业补贴之前的申报通知
+
+展示 Historical intent、Tavily 历史官方检索、届别/主题重排和历史材料只读。
+
+### 7. 相对年份与 Follow-up
 
 输入：
 
@@ -369,31 +457,7 @@ Realtime / Provider 测试已覆盖 Tavily 正常响应、timeout、401/403、42
 
 展示相对年份理解、画像归一、政策匹配，以及只针对缺失字段生成的 Follow-up。
 
-### 2. 完整创业画像
-
-输入：
-
-> 我在苏州，本科，2025年6月20日毕业，目前创业中，连续缴纳社保12个月，公司注册12个月
-
-展示精确日期理解、确定性资格判断、真实材料清单和办理计划。
-
-### 3. 实时官方政策查询
-
-输入：
-
-> 苏州创业社会保险补贴现在还能申请吗？
-
-展示 Tavily 官方检索、官方 evidence、本地结构化资格判断，以及实时信息与资格规则的隔离。
-
-### 4. 用户意图纠正
-
-输入：
-
-> 我不是创业，我只是自己按灵活就业交社保
-
-展示最新明确意图覆盖历史意图、创业政策退出，以及候选政策、Follow-up 和计划重新收敛。
-
-### 5. OUT_OF_SCOPE 分流
+### 8. OUT_OF_SCOPE 分流
 
 输入：
 
@@ -421,6 +485,7 @@ Realtime / Provider 测试已覆盖 Tavily 正常响应、timeout、401/403、42
 - 实时搜索依赖 Tavily 服务和官方网页可用性；
 - 后端 Session 当前为进程内存储，尚未接入业务数据库；
 - PDF、OCR、文件上传和复杂附件审核尚未作为正式核心能力；
+- 当前比赛 RC 仍可能存在不阻断主链路的 P2；
 - 系统不自动提交政府申请，也不代替主管部门正式审批；
 - 最终政策效力、申报窗口和审批结果以对应主管部门为准。
 
