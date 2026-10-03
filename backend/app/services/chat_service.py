@@ -163,6 +163,9 @@ class ChatService:
                 if candidate.requiredMaterials:
                     lines.append("申请材料：" + "；".join(candidate.requiredMaterials))
                 lines.append("官方来源：" + candidate.sourceUrl)
+                notice = state.policyReferenceNotices.get(candidate.policyId)
+                if notice:
+                    lines.append("时效提示：" + notice)
             lines.append("以上为政策事实说明，不代表对您个人资格的判断。")
             return "\n".join(lines)
         if state.needFollowUp and state.followUpQuestions:
