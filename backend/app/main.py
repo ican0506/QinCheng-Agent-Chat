@@ -17,6 +17,7 @@ from app.realtime_policy.tavily import TavilyRealtimeSearchProvider
 from app.realtime_policy.tool import OfficialRealtimePolicySearchTool
 from app.agent.tools.local_policy import LocalPolicySearchTool
 from app.agent.tools.rag_policy import RagPolicySearchTool
+from app.agent.tools.dify_policy import DifyPolicySearchTool
 from app.agent.tools.plan import DeterministicPlanTool
 from app.agent.tools.policy_compare import DeterministicPolicyCompareTool
 from app.api.chat import router as chat_router
@@ -91,8 +92,18 @@ def create_app(
     except Exception:
         logger.exception("Local policy knowledge base is unavailable; using structured search fallback")
         rag_retriever = None
-    policy_search_tool = RagPolicySearchTool(
+    rag_policy_search = RagPolicySearchTool(
         rag_retriever, policy_repository, local_policy_search
+    )
+    policy_search_tool = DifyPolicySearchTool(
+        enabled=active_settings.dify_knowledge_enabled,
+        base_url=active_settings.dify_base_url,
+        dataset_id=active_settings.dify_dataset_id,
+        api_key=active_settings.dify_dataset_api_key,
+        timeout_seconds=active_settings.dify_knowledge_timeout_seconds,
+        top_k=active_settings.dify_knowledge_top_k,
+        repository=policy_repository,
+        fallback=rag_policy_search,
     )
     policy_relation_repository = PolicyRelationRepository(
         backend_root / "data" / "policies" / "policy_relations.json"
@@ -123,6 +134,7 @@ def create_app(
     application.state.policy_repository = policy_repository
     application.state.policy_relation_repository = policy_relation_repository
     application.state.rag_retriever = rag_retriever
+    application.state.policy_search_tool = policy_search_tool
     application.state.realtime_search_provider = active_realtime_provider
     application.state.workflow_agent = workflow_agent
     profile_extractor = (

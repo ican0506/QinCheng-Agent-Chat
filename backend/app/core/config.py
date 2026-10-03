@@ -26,6 +26,12 @@ class Settings:
     realtime_policy_allowed_domains: tuple[str, ...] = ('suzhou.gov.cn', 'hrss.suzhou.gov.cn')
     realtime_policy_search_timeout_seconds: float = 8
     realtime_policy_search_max_results: int = 5
+    dify_knowledge_enabled: bool = False
+    dify_base_url: str = "https://api.dify.ai/v1"
+    dify_dataset_id: str = ""
+    dify_dataset_api_key: str = ""
+    dify_knowledge_timeout_seconds: float = 5
+    dify_knowledge_top_k: int = 5
 
     @property
     def llm_configured(self) -> bool:
@@ -62,4 +68,10 @@ class Settings:
             realtime_policy_allowed_domains=tuple(d.strip().lower() for d in os.getenv('REALTIME_POLICY_ALLOWED_DOMAINS', 'suzhou.gov.cn,hrss.suzhou.gov.cn').split(',') if d.strip()),
             realtime_policy_search_timeout_seconds=max(0.001, float(os.getenv('REALTIME_POLICY_SEARCH_TIMEOUT_SECONDS', '8'))),
             realtime_policy_search_max_results=max(1, int(os.getenv('REALTIME_POLICY_SEARCH_MAX_RESULTS', '5'))),
+            dify_knowledge_enabled=os.getenv('DIFY_KNOWLEDGE_ENABLED', 'false').lower() in {'true', '1', 'yes', 'on'},
+            dify_base_url=os.getenv('DIFY_BASE_URL', 'https://api.dify.ai/v1'),
+            dify_dataset_id=os.getenv('DIFY_DATASET_ID', ''),
+            dify_dataset_api_key=os.getenv('DIFY_DATASET_API_KEY', ''),
+            dify_knowledge_timeout_seconds=max(0.001, float(os.getenv('DIFY_KNOWLEDGE_TIMEOUT_SECONDS', '5'))),
+            dify_knowledge_top_k=max(1, int(os.getenv('DIFY_KNOWLEDGE_TOP_K', '5'))),
         )
