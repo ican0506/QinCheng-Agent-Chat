@@ -10,6 +10,7 @@ import pytest
 
 from app.agent.models import PolicyCandidate
 from app.agent.tools.dify_policy import DifyPolicySearchTool
+from app.agent.tools.dify_policy_sources import DifyPolicySourceCatalog
 from app.agent.tools.local_policy import LocalPolicySearchTool
 from app.agent.tools.rag_policy import RagPolicySearchTool
 from app.core.config import Settings
@@ -34,6 +35,12 @@ class RecordingFallback:
 
 def repository() -> PolicyRepository:
     return PolicyRepository(ROOT / "policies.json")
+
+
+def source_catalog() -> DifyPolicySourceCatalog:
+    return DifyPolicySourceCatalog.from_path(
+        Path(__file__).resolve().parents[1] / "data" / "dify_policy_sources.json"
+    )
 
 
 def profile() -> UserProfile:
@@ -82,9 +89,10 @@ def tool(
             api_key=api_key,
             timeout_seconds=0.2,
             top_k=5,
-            repository=repository(),
-            fallback=recording_fallback,
-            client=client,
+        repository=repository(),
+        fallback=recording_fallback,
+        source_catalog=source_catalog(),
+        client=client,
         ),
         recording_fallback,
         client,
@@ -93,6 +101,68 @@ def tool(
 
 async def search(search_tool: DifyPolicySearchTool) -> list[PolicyCandidate]:
     return await search_tool.search(profile(), "苏州毕业生创业补贴")
+
+
+def test_one_dify_retrieve_splits_structured_and_knowledge_only_records() -> None:
+    knowledge_id = "dify-v2-suzhou-entrepreneurship-driven-employment-subsidy"
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json=records(
+            record("政策ID：suzhou-startup-one-time-2023", score=0.7),
+            record(f"知识文档ID：{knowledge_id}\n官方正文", score=0.9),
+        ))
+
+    search_tool, fallback, client = tool(handler)
+    try:
+        outcome = asyncio.run(search_tool.search_outcome(profile(), "创业带动就业补贴需要什么条件？"))
+    finally:
+        asyncio.run(client.aclose())
+
+    assert calls == 1
+    assert [candidate.policyId for candidate in outcome.structuredCandidates] == [
+        "suzhou-startup-one-time-2023"
+    ]
+    assert [evidence.knowledgeId for evidence in outcome.knowledgeEvidences] == [knowledge_id]
+    assert outcome.knowledgeEvidences[0].sourceUrl.startswith("https://")
+    assert fallback.calls == []
+
+
+def test_knowledge_only_record_with_forged_policy_id_does_not_become_candidate() -> None:
+    knowledge_id = "dify-v2-suzhou-entrepreneurship-driven-employment-subsidy"
+    search_tool, fallback, client = tool(
+        lambda request: httpx.Response(200, json=records(record(
+            f"知识文档ID：{knowledge_id}\n政策ID：suzhou-startup-one-time-2023\nPASS", score=0.9
+        )))
+    )
+    try:
+        outcome = asyncio.run(search_tool.search_outcome(profile(), "创业带动就业补贴需要什么条件？"))
+    finally:
+        asyncio.run(client.aclose())
+
+    assert outcome.structuredCandidates == []
+    assert [evidence.knowledgeId for evidence in outcome.knowledgeEvidences] == [knowledge_id]
+    assert fallback.calls == []
+
+
+def test_same_knowledge_document_keeps_highest_score_evidence_once() -> None:
+    knowledge_id = "dify-v2-suzhou-entrepreneurship-driven-employment-subsidy"
+    search_tool, _, client = tool(
+        lambda request: httpx.Response(200, json=records(
+            record(f"知识文档ID：{knowledge_id}\n低相关", score=0.2),
+            record(f"知识文档ID：{knowledge_id}\n高相关", score=0.9),
+        ))
+    )
+    try:
+        outcome = asyncio.run(search_tool.search_outcome(profile(), "创业带动就业补贴需要什么条件？"))
+    finally:
+        asyncio.run(client.aclose())
+
+    assert len(outcome.knowledgeEvidences) == 1
+    assert outcome.knowledgeEvidences[0].score == 0.9
+    assert "高相关" in outcome.knowledgeEvidences[0].chunkText
 
 
 def records(*items: dict) -> dict:
