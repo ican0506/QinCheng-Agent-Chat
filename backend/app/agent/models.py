@@ -65,6 +65,17 @@ class PolicyCandidate(BaseModel):
     isMock: bool = True
 
 
+class KnowledgeEvidence(BaseModel):
+    """仅供事实型回复使用的只读 Dify 知识证据。"""
+
+    knowledgeId: str
+    policyName: str
+    sourceUrl: str
+    currentness: str
+    chunkText: str
+    score: float
+
+
 class ConditionResult(BaseModel):
     conditionId: str
     description: str
@@ -118,6 +129,7 @@ class GovernmentAgentState(BaseModel):
     policyReferenceNotices: dict[str, str] = Field(default_factory=dict)
     stage: AgentStage = AgentStage.PROFILE_COLLECTING
     candidatePolicies: list[PolicyCandidate] = Field(default_factory=list)
+    knowledgeEvidences: list[KnowledgeEvidence] = Field(default_factory=list)
     eligibilityResults: list[EligibilityResult] = Field(default_factory=list)
     policyRelations: list[PolicyRelation] = Field(default_factory=list)
     overallPlan: OverallPlan | None = None

@@ -18,6 +18,7 @@ from app.realtime_policy.tool import OfficialRealtimePolicySearchTool
 from app.agent.tools.local_policy import LocalPolicySearchTool
 from app.agent.tools.rag_policy import RagPolicySearchTool
 from app.agent.tools.dify_policy import DifyPolicySearchTool
+from app.agent.tools.dify_policy_sources import DifyPolicySourceCatalog
 from app.agent.tools.plan import DeterministicPlanTool
 from app.agent.tools.policy_compare import DeterministicPolicyCompareTool
 from app.api.chat import router as chat_router
@@ -104,6 +105,9 @@ def create_app(
         top_k=active_settings.dify_knowledge_top_k,
         repository=policy_repository,
         fallback=rag_policy_search,
+        source_catalog=DifyPolicySourceCatalog.from_path(
+            backend_root / "data" / "dify_policy_sources.json"
+        ),
     )
     policy_relation_repository = PolicyRelationRepository(
         backend_root / "data" / "policies" / "policy_relations.json"

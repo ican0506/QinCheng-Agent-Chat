@@ -9,8 +9,9 @@ from typing import Any
 
 import httpx
 
-from app.agent.models import PolicyCandidate
+from app.agent.models import KnowledgeEvidence, PolicyCandidate
 from app.agent.tools.base import PolicySearchTool
+from app.agent.tools.dify_policy_sources import DifyPolicySourceCatalog
 from app.models.chat import UserProfile
 from app.policy.models import PolicyRecord
 from app.policy.repository import PolicyRepository
@@ -33,11 +34,21 @@ class DifyRetrievalRecord:
     document_name: str | None
 
 
+@dataclass(frozen=True)
+class DifySearchOutcome:
+    structuredCandidates: list[PolicyCandidate]
+    knowledgeEvidences: list[KnowledgeEvidence]
+
+
 class DifyPolicySearchTool:
     """使用 Dify Knowledge 召回已入库政策；结构化事实仍只来自 PolicyRepository。"""
 
     _policy_id_pattern = re.compile(
         r"(?:^|\n)\s*(?:政策ID|policyId)\s*[:：]\s*([A-Za-z0-9._-]+)",
+        re.IGNORECASE,
+    )
+    _knowledge_id_pattern = re.compile(
+        r"(?:^|\n)\s*知识文档ID\s*[:：]\s*([A-Za-z0-9._-]+)",
         re.IGNORECASE,
     )
     _document_name_aliases = {
@@ -55,6 +66,7 @@ class DifyPolicySearchTool:
         top_k: int,
         repository: PolicyRepository,
         fallback: PolicySearchTool,
+        source_catalog: DifyPolicySourceCatalog | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self._enabled = enabled
@@ -65,24 +77,34 @@ class DifyPolicySearchTool:
         self._top_k = top_k
         self._repository = repository
         self._fallback = fallback
+        self._source_catalog = source_catalog
         self._client = client
 
     async def search(self, profile: UserProfile, message: str) -> list[PolicyCandidate]:
+        return (await self.search_outcome(profile, message)).structuredCandidates
+
+    async def search_outcome(self, profile: UserProfile, message: str) -> DifySearchOutcome:
         started = perf_counter()
         if not self._enabled:
-            return await self._fallback_with_log(profile, message, "disabled", started)
+            return DifySearchOutcome(
+                await self._fallback_with_log(profile, message, "disabled", started), []
+            )
         if not self._dataset_id or not self._api_key.strip():
-            return await self._fallback_with_log(profile, message, "missing_config", started)
+            return DifySearchOutcome(
+                await self._fallback_with_log(profile, message, "missing_config", started), []
+            )
 
         try:
             records = await self._retrieve(message)
         except DifyPolicySearchError as exc:
-            return await self._fallback_with_log(
-                profile, message, exc.reason, started, exc.status_code
+            return DifySearchOutcome(
+                await self._fallback_with_log(
+                    profile, message, exc.reason, started, exc.status_code
+                ), []
             )
 
-        candidates, unmapped = self._candidates_from_records(records)
-        if candidates:
+        candidates, evidences, unmapped = self._outcome_from_records(records)
+        if candidates or evidences:
             self._log(
                 elapsed_ms=(perf_counter() - started) * 1000,
                 status_code=200,
@@ -90,14 +112,16 @@ class DifyPolicySearchTool:
                 mapped_policy_ids=[candidate.policyId for candidate in candidates],
                 fallback_reason=None,
             )
-            return candidates
-        return await self._fallback_with_log(
-            profile,
-            message,
-            "unmapped" if unmapped else "no_match",
-            started,
-            200,
-            records_count=len(records),
+            return DifySearchOutcome(candidates, evidences)
+        return DifySearchOutcome(
+            await self._fallback_with_log(
+                profile,
+                message,
+                "unmapped" if unmapped else "no_match",
+                started,
+                200,
+                records_count=len(records),
+            ), []
         )
 
     async def _retrieve(self, message: str) -> list[DifyRetrievalRecord]:
@@ -164,12 +188,19 @@ class DifyPolicySearchTool:
             document_name=document_name.strip() if isinstance(document_name, str) and document_name.strip() else None,
         )
 
-    def _candidates_from_records(
+    def _outcome_from_records(
         self, records: list[DifyRetrievalRecord]
-    ) -> tuple[list[PolicyCandidate], bool]:
+    ) -> tuple[list[PolicyCandidate], list[KnowledgeEvidence], bool]:
         best_records: dict[str, tuple[PolicyRecord, DifyRetrievalRecord]] = {}
+        best_evidences: dict[str, KnowledgeEvidence] = {}
         saw_unmapped = False
         for retrieval_record in records:
+            evidence = self._knowledge_evidence_for(retrieval_record)
+            if evidence is not None:
+                existing_evidence = best_evidences.get(evidence.knowledgeId)
+                if existing_evidence is None or evidence.score > existing_evidence.score:
+                    best_evidences[evidence.knowledgeId] = evidence
+                continue
             policy_record = self._policy_record_for(retrieval_record)
             if policy_record is None:
                 saw_unmapped = True
@@ -181,7 +212,30 @@ class DifyPolicySearchTool:
         ordered = sorted(
             best_records.values(), key=lambda item: (-item[1].score, item[0].policyId)
         )
-        return [self._candidate(record, hit) for record, hit in ordered], saw_unmapped
+        evidences = sorted(best_evidences.values(), key=lambda item: (-item.score, item.knowledgeId))
+        return [self._candidate(record, hit) for record, hit in ordered], evidences, saw_unmapped
+
+    def _knowledge_evidence_for(
+        self, retrieval_record: DifyRetrievalRecord
+    ) -> KnowledgeEvidence | None:
+        if self._source_catalog is None:
+            return None
+        match = self._knowledge_id_pattern.search(retrieval_record.content)
+        source = (
+            self._source_catalog.get_by_knowledge_id(match.group(1).strip())
+            if match is not None
+            else self._source_catalog.get_by_document_name(retrieval_record.document_name)
+        )
+        if source is None or source.structuredPolicyId is not None:
+            return None
+        return KnowledgeEvidence(
+            knowledgeId=source.knowledgeId,
+            policyName=source.policyName,
+            sourceUrl=source.sourceUrl,
+            currentness=source.currentness,
+            chunkText=retrieval_record.content,
+            score=retrieval_record.score,
+        )
 
     def _policy_record_for(self, retrieval_record: DifyRetrievalRecord) -> PolicyRecord | None:
         match = self._policy_id_pattern.search(retrieval_record.content)
