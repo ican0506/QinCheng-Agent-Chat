@@ -6,14 +6,17 @@ from datetime import date
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import pytest
 
+from app.agent.models import GovernmentAgentState, PolicyCandidate
 from app.main import create_app
 from app.models.chat import UserProfile
 from app.policy.repository import PolicyRepository
 from app.realtime_policy.models import SearchResult
 from app.realtime_policy.provider import FakeRealtimeSearchProvider
 from app.realtime_policy.tool import OfficialRealtimePolicySearchTool
-from app.services.policy_query_context import PolicyQueryMode, PolicyQueryModeDetector
+from app.services.chat_service import ChatService
+from app.services.policy_query_context import PolicyDomainIntent, PolicyQueryMode, PolicyQueryModeDetector
 from app.services.profile_update_parser import ProfileUpdateParser
 from test_real_workflow_tools import settings
 from test_release_regression import FailingProvider
@@ -67,6 +70,19 @@ def test_policy_query_mode_distinguishes_fact_and_personalized_queries() -> None
     ) is PolicyQueryMode.PERSONALIZED_QUERY
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "我自己按灵活就业交社保，有什么补贴？",
+        "就业见习适合哪些毕业生？",
+    ],
+)
+def test_policy_information_questions_are_fact_queries_without_profile_gate(
+    message: str,
+) -> None:
+    assert PolicyQueryModeDetector.detect(message) is PolicyQueryMode.FACT_QUERY
+
+
 def test_new_session_fact_query_searches_local_policy_without_base_profile_follow_up() -> None:
     provider = FakeRealtimeSearchProvider([])
     client = _client(provider)
@@ -81,6 +97,73 @@ def test_new_session_fact_query_searches_local_policy_without_base_profile_follo
         for policy in data["policies"]
     )
     assert "连续缴纳" in data["replyText"]
+
+
+@pytest.mark.parametrize(
+    ("message", "expected_policy_id"),
+    [
+        ("我自己按灵活就业交社保，有什么补贴？", "suzhou-flexible-social-2021"),
+        ("就业见习适合哪些毕业生？", "suzhou-employment-internship-2024"),
+    ],
+)
+def test_new_session_policy_information_query_searches_without_profile_follow_up(
+    message: str, expected_policy_id: str,
+) -> None:
+    data = _send(_client(), message)
+
+    assert data["needFollowUp"] is False
+    assert data["followUpQuestions"] == []
+    assert any(policy["policyId"] == expected_policy_id for policy in data["policies"])
+
+
+def test_incomplete_profile_historical_fact_query_keeps_closed_notice_in_reply() -> None:
+    data = _send(_client(), "2026届求职创业补贴什么时候申报？")
+
+    assert data["needFollowUp"] is False
+    assert any(
+        policy["policyId"] == "suzhou-job-seeking-subsidy-2026"
+        for policy in data["policies"]
+    )
+    assert "历史申报通知" in data["replyText"]
+    assert "申报窗口已结束" in data["replyText"]
+    assert "当前开放申领" not in data["replyText"]
+
+
+def test_fact_query_keeps_historical_closed_notice_with_mixed_candidates() -> None:
+    historical = PolicyCandidate(
+        policyId="suzhou-job-seeking-subsidy-2026",
+        name="求职创业补贴（2026届毕业生申领通知）",
+        region="苏州市",
+        department="人社部门",
+        summary="历史通知",
+        effectiveDate="",
+        sourceUrl="https://example.invalid/historical",
+        matchReason="test",
+        isMock=False,
+    )
+    current = historical.model_copy(
+        update={
+            "policyId": "suzhou-startup-social-2021",
+            "name": "创业社会保险补贴",
+            "sourceUrl": "https://example.invalid/current",
+        }
+    )
+    state = GovernmentAgentState(
+        sessionId="historical-fact-mixed",
+        userMessage="2026届求职创业补贴什么时候申报？",
+        userProfile=UserProfile(),
+        domainIntent=PolicyDomainIntent.IN_SCOPE,
+        queryMode=PolicyQueryMode.FACT_QUERY,
+        candidatePolicies=[historical, current],
+        policyReferenceNotices={
+            historical.policyId: "当前知识库中的该记录为历史申报通知，申报窗口已结束。"
+        },
+    )
+
+    reply = ChatService._fallback_reply(state)
+
+    assert "历史申报通知" in reply
+    assert "申报窗口已结束" in reply
 
 
 def test_new_session_current_fact_query_calls_realtime_once() -> None:
