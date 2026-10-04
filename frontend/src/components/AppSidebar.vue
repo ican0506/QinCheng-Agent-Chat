@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { GraduationCap, MessageSquare, Plus, ShieldCheck, X } from "@lucide/vue";
+import { GraduationCap, MessageSquare, MoreHorizontal, Plus, ShieldCheck, Trash2, X } from "@lucide/vue";
+import { ref } from "vue";
 import type { ChatSession } from "../types/agent";
 
 defineProps<{
@@ -12,8 +13,18 @@ const emit = defineEmits<{
   close: [];
   newSession: [];
   selectSession: [sessionId: string];
+  deleteSession: [sessionId: string];
   privacy: [];
 }>();
+
+const deletingMenuFor = ref("");
+
+function requestDelete(sessionId: string): void {
+  deletingMenuFor.value = "";
+  if (window.confirm("删除后，该会话中的消息、画像和分析结果将被删除。")) {
+    emit("deleteSession", sessionId);
+  }
+}
 </script>
 
 <template>
@@ -37,21 +48,24 @@ const emit = defineEmits<{
 
     <div class="history-section">
       <p class="sidebar-label">最近任务</p>
-      <button
+      <div
         v-for="session in sessions"
         :key="session.sessionId"
-        type="button"
         class="history-item"
         :class="{ 'history-item--active': session.sessionId === activeSessionId }"
-        :aria-current="session.sessionId === activeSessionId ? 'page' : undefined"
-        @click="emit('selectSession', session.sessionId)"
       >
-        <MessageSquare :size="16" />
-        <span class="history-copy">
-          <strong>{{ session.title }}</strong>
-          <small>{{ session.latestChatData ? (session.latestChatData.needFollowUp ? "等待补充信息" : "已获得分析结果") : "等待咨询" }}</small>
-        </span>
-      </button>
+        <button type="button" class="history-select" :aria-current="session.sessionId === activeSessionId ? 'page' : undefined" @click="emit('selectSession', session.sessionId)">
+          <MessageSquare :size="16" />
+          <span class="history-copy">
+            <strong>{{ session.title }}</strong>
+            <small>{{ session.latestChatData ? (session.latestChatData.needFollowUp ? "等待补充信息" : "已获得分析结果") : "等待咨询" }}</small>
+          </span>
+        </button>
+        <div class="history-menu">
+          <button type="button" class="history-menu-trigger" title="会话操作" @click="deletingMenuFor = deletingMenuFor === session.sessionId ? '' : session.sessionId"><MoreHorizontal :size="16" /></button>
+          <button v-if="deletingMenuFor === session.sessionId" type="button" class="history-delete" @click="requestDelete(session.sessionId)"><Trash2 :size="13" />删除对话</button>
+        </div>
+      </div>
     </div>
 
     <div class="sidebar-footer">

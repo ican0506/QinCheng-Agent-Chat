@@ -5,11 +5,11 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Header, Request
+from fastapi import APIRouter, Header, Query, Request
 from fastapi.responses import StreamingResponse
 
 from app.core.errors import AppError
-from app.models.chat import ApiResponse, ChatData, ChatRequest
+from app.models.chat import ApiResponse, ChatData, ChatRequest, SessionProfileUpdateRequest
 
 router = APIRouter(prefix="/api", tags=["Chat"])
 logger = logging.getLogger(__name__)
@@ -88,6 +88,34 @@ async def stream_chat(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.put("/agent/sessions/{session_id}/profile", response_model=ApiResponse[ChatData])
+async def update_session_profile(
+    session_id: str,
+    payload: SessionProfileUpdateRequest,
+    request: Request,
+    x_trace_id: str | None = Header(default=None, alias="X-Trace-Id"),
+) -> ApiResponse[ChatData]:
+    trace_id = resolve_trace_id(x_trace_id)
+    request.state.trace_id = trace_id
+    data = await request.app.state.chat_service.update_session_profile(
+        session_id, payload.userId, payload.profile
+    )
+    return ApiResponse(code=0, message="success", traceId=trace_id, data=data)
+
+
+@router.delete("/agent/sessions/{session_id}", response_model=ApiResponse[dict[str, bool]])
+async def delete_session(
+    session_id: str,
+    request: Request,
+    user_id: str = Query(alias="userId", min_length=1, max_length=128),
+    x_trace_id: str | None = Header(default=None, alias="X-Trace-Id"),
+) -> ApiResponse[dict[str, bool]]:
+    trace_id = resolve_trace_id(x_trace_id)
+    request.state.trace_id = trace_id
+    deleted = await request.app.state.chat_service.delete_session(session_id, user_id)
+    return ApiResponse(code=0, message="success", traceId=trace_id, data={"deleted": deleted})
 
 
 @router.get("/health")

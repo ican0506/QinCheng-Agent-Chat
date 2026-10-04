@@ -6,7 +6,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.agent.models import GovernmentAgentState
 from app.agent.reply_tools import ReplyToolContext, ReplyToolRegistry
@@ -41,7 +41,11 @@ _WEEKDAY_NAMES = ("一", "二", "三", "四", "五", "六", "日")
 
 def current_date_directive() -> str:
     """服务器当前日期（Asia/Shanghai）。LLM 不知道今天几号，必须显式注入，否则会编造日期。"""
-    now = datetime.now(ZoneInfo("Asia/Shanghai"))
+    try:
+        now = datetime.now(ZoneInfo("Asia/Shanghai"))
+    except ZoneInfoNotFoundError:
+        # 极简测试镜像可能没有系统 tzdata；日期提示不能因此中断 Chat / SSE 主链路。
+        now = datetime.now()
     return (
         f"当前日期：{now.year}年{now.month}月{now.day}日 星期{_WEEKDAY_NAMES[now.isoweekday() - 1]}（Asia/Shanghai）。"
         "用户提及「今天/现在/最近/最新」等时间时一律以该日期为准；"

@@ -5,12 +5,12 @@ import MaterialChecklist from "./MaterialChecklist.vue";
 import PlanTimeline from "./PlanTimeline.vue";
 import PolicyResultList from "./PolicyResultList.vue";
 import ProfileSummaryBlock from "./ProfileSummaryBlock.vue";
-import type { ChatData, MaterialResult } from "../../types/chat";
+import type { ChatData, MaterialResult, UserProfile } from "../../types/chat";
 import { computed } from "vue";
 import { isPolicyMaterialReferenceOnly } from "../../workspace/selectors";
 
-const props = defineProps<{ data?: ChatData; busy: boolean }>();
-const emit = defineEmits<{ followUp: [question: string]; materialDeclare: [materialId: string, prepared: boolean] }>();
+const props = defineProps<{ data?: ChatData; busy: boolean; profileSaving?: boolean; profileError?: string }>();
+const emit = defineEmits<{ followUp: [question: string]; materialDeclare: [materialId: string, prepared: boolean]; profileSave: [profile: UserProfile] }>();
 const policyNames = computed(() => Object.fromEntries((props.data?.policies ?? []).map((policy) => [policy.policyId, policy.name])));
 const referenceOnlyPolicyIds = computed(() => new Set(
   (props.data?.policies ?? [])
@@ -41,7 +41,7 @@ function declareMaterial(material: MaterialResult, prepared: boolean): void {
         <strong>Agent 正在分析…</strong><p>结果将在本次回复完成后显示。</p>
       </div>
       <template v-if="data">
-        <ProfileSummaryBlock :profile="data.userProfile" />
+        <ProfileSummaryBlock :profile="data.userProfile" :saving="profileSaving" :error="profileError" @save="emit('profileSave', $event)" />
         <FollowUpBlock v-if="data.needFollowUp && data.followUpQuestions.length" :questions="data.followUpQuestions" @select="emit('followUp', $event)" />
         <PolicyResultList :policies="data.policies" :data="data" />
         <MaterialChecklist :results="data.materialResults" :policy-names="policyNames" :reference-policy-ids="referenceOnlyPolicyIds" :busy="busy" @declare="declareMaterial" />

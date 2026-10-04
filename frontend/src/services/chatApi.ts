@@ -1,4 +1,4 @@
-import type { ApiResponse, ChatData, ChatRequest } from "../types/chat";
+import type { ApiResponse, ChatData, ChatRequest, UserProfile } from "../types/chat";
 
 export class ChatApiError extends Error {
   constructor(
@@ -47,6 +47,52 @@ export async function sendChatMessage(
     throw new ChatApiError("服务返回了无法识别的响应", fallbackTraceId);
   }
 
+  if (!response.ok || body.code !== 0 || !body.data) {
+    throw new ChatApiError(body.message || "请求失败，请稍后重试", body.traceId);
+  }
+  return body.data;
+}
+
+export async function updateSessionProfile(
+  sessionId: string,
+  userId: string,
+  profile: UserProfile,
+): Promise<ChatData> {
+  return requestJson<ChatData>(`/api/agent/sessions/${encodeURIComponent(sessionId)}/profile`, {
+    method: "PUT",
+    body: JSON.stringify({ userId, profile }),
+  });
+}
+
+export async function deleteAgentSession(sessionId: string, userId: string): Promise<boolean> {
+  const response = await requestJson<{ deleted: boolean }>(
+    `/api/agent/sessions/${encodeURIComponent(sessionId)}?userId=${encodeURIComponent(userId)}`,
+    { method: "DELETE" },
+  );
+  return response.deleted;
+}
+
+async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
+  const fallbackTraceId = createTraceId();
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Trace-Id": fallbackTraceId,
+        ...(init.headers ?? {}),
+      },
+    });
+  } catch {
+    throw new ChatApiError("无法连接对话服务，请检查服务是否已启动", fallbackTraceId);
+  }
+  let body: ApiResponse<T>;
+  try {
+    body = (await response.json()) as ApiResponse<T>;
+  } catch {
+    throw new ChatApiError("服务返回了无法识别的响应", fallbackTraceId);
+  }
   if (!response.ok || body.code !== 0 || !body.data) {
     throw new ChatApiError(body.message || "请求失败，请稍后重试", body.traceId);
   }

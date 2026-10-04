@@ -12,7 +12,7 @@ import asyncio
 from app.agent.models import GovernmentAgentState
 from app.realtime_policy.models import RealtimeSearchStatus
 from app.agent.workflow import WorkflowAgent
-from app.models.chat import ChatData, ChatRequest, WebSource
+from app.models.chat import ChatData, ChatRequest, UserProfile, WebSource
 from app.core.errors import LLMServiceError
 from app.services.llm.base import LLMMessage, LLMProvider
 from app.stores.session_store import InMemorySessionStore
@@ -41,6 +41,17 @@ from app.services.agent_reply_engine import (
 
 logger = logging.getLogger(__name__)
 timing_logger = logging.getLogger("uvicorn.error")
+
+EDITABLE_PROFILE_FIELDS = frozenset({
+    "city",
+    "residencyRegistration",
+    "education",
+    "graduationYear",
+    "graduationMonth",
+    "employmentStatus",
+    "flexibleEmploymentInsurance",
+    "entrepreneurshipIntent",
+})
 
 
 SYSTEM_PROMPT = """你是面向应届毕业生的就业创业政策对话助手。
@@ -88,6 +99,49 @@ class ChatService:
         self._policy_repository = policy_repository
         self._final_explanation_timeout_seconds = final_explanation_timeout_seconds
         self._reply_engine = reply_engine
+
+    async def delete_session(self, session_id: str, user_id: str) -> bool:
+        return await self._store.delete_session(session_id, user_id)
+
+    async def update_session_profile(
+        self, session_id: str, user_id: str, submitted_profile: UserProfile
+    ) -> ChatData:
+        """保存用户手动确认的画像，并仅基于当前会话重新运行既有工作流。"""
+        patch = {
+            field: getattr(submitted_profile, field)
+            for field in submitted_profile.model_fields_set
+            if field in EDITABLE_PROFILE_FIELDS
+        }
+        if "city" in patch and patch["city"] in {"苏州", "苏州市"}:
+            patch["city"] = "苏州市"
+        if "residencyRegistration" in patch and patch["residencyRegistration"] in {"昆山户籍", "昆山市户籍", "苏州户籍", "苏州市户籍"}:
+            patch["residencyRegistration"] = "本市户籍"
+        # unemploymentStatus 是资格规则使用的内部派生字段。手工更新就业状态时
+        # 必须同步它，避免先前聊天提取出的“未就业”继续参与后续判断。
+        if patch.get("employmentStatus") == "待就业":
+            patch["unemploymentStatus"] = "未就业"
+        elif "employmentStatus" in patch:
+            patch["unemploymentStatus"] = None
+        profile = await self._store.update_manual_profile(session_id, user_id, patch)
+        declarations = await self._store.get_material_declarations(session_id, user_id)
+        previous_query = await self._store.get_policy_query_context(session_id, user_id)
+        workflow_message = previous_query or "更新个人画像"
+        state = await self._execute_workflow(
+            session_id=session_id,
+            message=workflow_message,
+            user_profile=profile,
+            material_declarations=declarations,
+            policy_search_query=previous_query or workflow_message,
+        )
+        await self._store.set_material_declarations(session_id, user_id, state.materialDeclarations)
+        await self._store.set_internal_profile(session_id, user_id, state.userProfile)
+        request = ChatRequest(
+            sessionId=session_id,
+            userId=user_id,
+            message=workflow_message,
+            userProfile=UserProfile(),
+        )
+        return self._result(request, state, self._fallback_reply(state))
 
     async def _messages(
         self, request: ChatRequest, state: GovernmentAgentState
@@ -280,10 +334,11 @@ class ChatService:
             )
             metrics.workflow_ms = (perf_counter() - workflow_started_at) * 1000
             return state
+        manual_fields = await self._store.get_manual_profile_fields(request.sessionId, request.userId)
         request_values = {
             name: getattr(request.userProfile, name)
             for name in request.userProfile.__class__.model_fields
-            if getattr(request.userProfile, name) is not None
+            if getattr(request.userProfile, name) is not None and name not in manual_fields
         }
         rule_patch = ProfileUpdateParser.parse(request.message, current_date=self._current_date)
         llm_patch: dict[str, object] = {}
@@ -315,31 +370,61 @@ class ChatService:
         deterministic_intent_patch = ProfileUpdateParser.deterministic_intent_overrides(
             request.message
         )
+        current_rule_patch = {
+            **rule_patch,
+            # LLM 只补足自然语言字段；明确的日期、意图、参保和就业纠正规则必须最后生效。
+            **llm_patch,
+            **graduation_date_patch,
+            **relative_time_patch,
+            **deterministic_intent_patch,
+            **ProfileUpdateParser.flexible_insurance_overrides(request.message),
+            **ProfileUpdateParser.employment_status_overrides(request.message),
+        }
+        # 手动值阻止陈旧客户端快照覆盖；本轮明确解析到的消息始终可以纠正手动值。
+        await self._store.clear_manual_profile_fields(
+            request.sessionId, request.userId, set(current_rule_patch) | set(llm_patch)
+        )
         profile = stored_profile.model_copy(
             update={
                 **request_values,
-                **rule_patch,
-                **llm_patch,
-                **graduation_date_patch,
-                **relative_time_patch,
-                **deterministic_intent_patch,
-                **ProfileUpdateParser.flexible_insurance_overrides(request.message),
-                **ProfileUpdateParser.employment_status_overrides(request.message),
+                **current_rule_patch,
             }
         )
-        workflow_started_at = perf_counter()
-        workflow_timings: dict[str, float] = {}
-        state = await self._workflow_agent.run(
+        state = await self._execute_workflow(
             session_id=request.sessionId,
             message=request.message.strip(),
             user_profile=profile,
             material_declarations=declarations,
             policy_search_query=search_query,
+            metrics=metrics,
+        )
+        await self._store.set_material_declarations(request.sessionId, request.userId, state.materialDeclarations)
+        await self._store.set_internal_profile(request.sessionId, request.userId, state.userProfile)
+        return state
+
+    async def _execute_workflow(
+        self,
+        session_id: str,
+        message: str,
+        user_profile: UserProfile,
+        material_declarations: dict[str, bool],
+        policy_search_query: str | None,
+        metrics: RequestTimings | None = None,
+    ) -> GovernmentAgentState:
+        workflow_started_at = perf_counter()
+        workflow_timings: dict[str, float] = {}
+        state = await self._workflow_agent.run(
+            session_id=session_id,
+            message=message,
+            user_profile=user_profile,
+            material_declarations=material_declarations,
+            policy_search_query=policy_search_query,
             timings=workflow_timings,
         )
-        metrics.workflow_ms = (perf_counter() - workflow_started_at) * 1000
-        metrics.realtime_search_ms = workflow_timings.get("realtime_search_ms", 0)
-        metrics.material_updated = state.materialDeclarations != declarations
+        if metrics is not None:
+            metrics.workflow_ms = (perf_counter() - workflow_started_at) * 1000
+            metrics.realtime_search_ms = workflow_timings.get("realtime_search_ms", 0)
+            metrics.material_updated = state.materialDeclarations != material_declarations
         if self._policy_repository is not None:
             for candidate in state.candidatePolicies:
                 record = self._policy_repository.get_by_id(candidate.policyId)
@@ -356,8 +441,6 @@ class ChatService:
                 else:
                     continue
                 state.policyReferenceNotices[candidate.policyId] = notice
-        await self._store.set_material_declarations(request.sessionId, request.userId, state.materialDeclarations)
-        await self._store.set_internal_profile(request.sessionId, request.userId, state.userProfile)
         return state
 
     @staticmethod

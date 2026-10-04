@@ -9,10 +9,14 @@ export interface UserProfile {
   city?: string | null;
   education?: "本科" | "硕士" | "专科" | "其他" | null;
   graduationYear?: number | null;
+  graduationMonth?: number | null;
   employmentStatus?: "待就业" | "已就业" | "创业中" | null;
   isFirstTimeEntrepreneur?: boolean | null;
   enterpriseRegisterDate?: string | null;
   socialInsuranceMonths?: number | null;
+  residencyRegistration?: string | null;
+  flexibleEmploymentInsurance?: boolean | null;
+  entrepreneurshipIntent?: boolean | null;
   housingStatus?: "租房" | "自有" | "其他" | null;
   fields?: ProfileField[];
 }

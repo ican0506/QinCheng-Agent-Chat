@@ -16,6 +16,7 @@ class SessionRecord:
     material_declarations: dict[str, bool] = field(default_factory=dict)
     internal_profile: UserProfile = field(default_factory=UserProfile)
     policy_query_context: str | None = None
+    manual_profile_fields: set[str] = field(default_factory=set)
 
 
 class InMemorySessionStore:
@@ -97,6 +98,54 @@ class InMemorySessionStore:
             elif record.user_id != user_id:
                 raise InvalidRequestError("sessionId 与 userId 不匹配")
             record.internal_profile = profile.model_copy(deep=True)
+
+    async def get_manual_profile_fields(self, session_id: str, user_id: str) -> set[str]:
+        async with self._lock:
+            record = self._sessions.get(session_id)
+            if record is None:
+                return set()
+            if record.user_id != user_id:
+                raise InvalidRequestError("sessionId 与 userId 不匹配")
+            return set(record.manual_profile_fields)
+
+    async def update_manual_profile(
+        self, session_id: str, user_id: str, patch: dict[str, object]
+    ) -> UserProfile:
+        async with self._lock:
+            record = self._sessions.get(session_id)
+            if record is None:
+                record = SessionRecord(user_id=user_id)
+                self._sessions[session_id] = record
+            elif record.user_id != user_id:
+                raise InvalidRequestError("sessionId 与 userId 不匹配")
+            record.internal_profile = record.internal_profile.model_copy(update=patch)
+            record.manual_profile_fields.update(patch)
+            self._sessions.move_to_end(session_id)
+            return record.internal_profile.model_copy(deep=True)
+
+    async def clear_manual_profile_fields(
+        self, session_id: str, user_id: str, fields: set[str]
+    ) -> None:
+        if not fields:
+            return
+        async with self._lock:
+            record = self._sessions.get(session_id)
+            if record is None:
+                return
+            if record.user_id != user_id:
+                raise InvalidRequestError("sessionId 与 userId 不匹配")
+            record.manual_profile_fields.difference_update(fields)
+
+    async def delete_session(self, session_id: str, user_id: str) -> bool:
+        """仅删除目标会话的内存消息、画像、材料声明和查询上下文。"""
+        async with self._lock:
+            record = self._sessions.get(session_id)
+            if record is None:
+                return False
+            if record.user_id != user_id:
+                raise InvalidRequestError("sessionId 与 userId 不匹配")
+            del self._sessions[session_id]
+            return True
 
     async def get_policy_query_context(self, session_id: str, user_id: str) -> str | None:
         async with self._lock:
