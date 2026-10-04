@@ -20,12 +20,19 @@ class Settings:
     profile_extraction_enabled: bool = False
     profile_extraction_timeout_seconds: float = 5
     final_explanation_timeout_seconds: float = 12
+    agent_reply_enabled: bool = True
+    agent_reply_max_tool_rounds: int = 3
+    agent_reply_timeout_seconds: float = 15
     realtime_policy_search_enabled: bool = False
     realtime_policy_search_provider: str = ''
     realtime_policy_search_api_key: str = ''
     realtime_policy_allowed_domains: tuple[str, ...] = ('suzhou.gov.cn', 'hrss.suzhou.gov.cn')
     realtime_policy_search_timeout_seconds: float = 8
     realtime_policy_search_max_results: int = 5
+    web_search_enabled: bool = False
+    web_search_api_key: str = ''
+    web_search_timeout_seconds: float = 8
+    web_search_max_results: int = 5
     dify_knowledge_enabled: bool = False
     dify_base_url: str = "https://api.dify.ai/v1"
     dify_dataset_id: str = ""
@@ -36,6 +43,10 @@ class Settings:
     @property
     def llm_configured(self) -> bool:
         return bool(self.llm_api_key and self.llm_model and self.llm_base_url)
+
+    @property
+    def web_search_configured(self) -> bool:
+        return bool(self.web_search_enabled and self.web_search_api_key.strip())
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -62,12 +73,19 @@ class Settings:
             profile_extraction_enabled=os.getenv("PROFILE_EXTRACTION_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
             profile_extraction_timeout_seconds=float(os.getenv("PROFILE_EXTRACTION_TIMEOUT_SECONDS", "5")),
             final_explanation_timeout_seconds=max(0.001, float(os.getenv("FINAL_EXPLANATION_TIMEOUT_SECONDS", "12"))),
+            agent_reply_enabled=os.getenv("AGENT_REPLY_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
+            agent_reply_max_tool_rounds=max(1, int(os.getenv("AGENT_REPLY_MAX_TOOL_ROUNDS", "3"))),
+            agent_reply_timeout_seconds=max(0.001, float(os.getenv("AGENT_REPLY_TIMEOUT_SECONDS", "15"))),
             realtime_policy_search_enabled=os.getenv('REALTIME_POLICY_SEARCH_ENABLED', 'false').lower() in {'true','1','yes','on'},
             realtime_policy_search_provider=os.getenv('REALTIME_POLICY_SEARCH_PROVIDER', ''),
             realtime_policy_search_api_key=os.getenv('REALTIME_POLICY_SEARCH_API_KEY', ''),
             realtime_policy_allowed_domains=tuple(d.strip().lower() for d in os.getenv('REALTIME_POLICY_ALLOWED_DOMAINS', 'suzhou.gov.cn,hrss.suzhou.gov.cn').split(',') if d.strip()),
             realtime_policy_search_timeout_seconds=max(0.001, float(os.getenv('REALTIME_POLICY_SEARCH_TIMEOUT_SECONDS', '8'))),
             realtime_policy_search_max_results=max(1, int(os.getenv('REALTIME_POLICY_SEARCH_MAX_RESULTS', '5'))),
+            web_search_enabled=os.getenv('WEB_SEARCH_ENABLED', 'false').lower() in {'true', '1', 'yes', 'on'},
+            web_search_api_key=os.getenv('WEB_SEARCH_API_KEY', ''),
+            web_search_timeout_seconds=max(0.001, float(os.getenv('WEB_SEARCH_TIMEOUT_SECONDS', '8'))),
+            web_search_max_results=max(1, int(os.getenv('WEB_SEARCH_MAX_RESULTS', '5'))),
             dify_knowledge_enabled=os.getenv('DIFY_KNOWLEDGE_ENABLED', 'false').lower() in {'true', '1', 'yes', 'on'},
             dify_base_url=os.getenv('DIFY_BASE_URL', 'https://api.dify.ai/v1'),
             dify_dataset_id=os.getenv('DIFY_DATASET_ID', ''),

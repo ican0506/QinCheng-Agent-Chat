@@ -10,14 +10,18 @@ const props = defineProps<{
   messages: ChatMessage[];
   draft: string;
   busy: boolean;
+  webSearch: boolean;
   suggestions: string[];
 }>();
 
 const emit = defineEmits<{
   openSidebar: [];
   "update:draft": [value: string];
+  "update:webSearch": [value: boolean];
   send: [text?: string];
   retry: [message: ChatMessage];
+  pause: [];
+  resume: [message: ChatMessage];
 }>();
 
 const messageList = ref<HTMLElement | null>(null);
@@ -79,6 +83,7 @@ watch(
           :key="message.id"
           :message="message"
           @retry="emit('retry', $event)"
+          @resume="emit('resume', $event)"
         />
       </div>
     </div>
@@ -89,8 +94,11 @@ watch(
           ref="composer"
           :model-value="draft"
           :busy="busy"
+          :web-search="webSearch"
           @update:model-value="emit('update:draft', $event)"
+          @update:web-search="emit('update:webSearch', $event)"
           @send="emit('send')"
+          @pause="emit('pause')"
         />
         <p class="disclaimer">具体政策以当地官方发布和后续政策库检索结果为准</p>
       </div>

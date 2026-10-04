@@ -3,10 +3,24 @@ import { ref } from "vue";
 import { MessagesSquare, PanelRight } from "@lucide/vue";
 import AppSidebar from "./components/AppSidebar.vue";
 import ChatPanel from "./components/ChatPanel.vue";
+import PrivacyDialog from "./components/PrivacyDialog.vue";
 import AgentWorkspace from "./components/workspace/AgentWorkspace.vue";
 import { useAgentWorkbench } from "./composables/useAgentWorkbench";
 import { materialDeclarationMessage } from "./workspace/materials";
 import type { MaterialResult } from "./types/chat";
+
+const PRIVACY_ACK_KEY = "graduate-policy-privacy-ack-v1";
+const privacyOpen = ref(!localStorage.getItem(PRIVACY_ACK_KEY));
+
+function acknowledgePrivacy(): void {
+  localStorage.setItem(PRIVACY_ACK_KEY, "1");
+  privacyOpen.value = false;
+}
+
+function handleClearData(): void {
+  clearAllData();
+  acknowledgePrivacy();
+}
 
 const suggestions = [
   "我是今年毕业生，想了解本地就业补贴",
@@ -23,11 +37,16 @@ const {
   latestChatData,
   draft,
   busy,
+  webSearch,
+  setWebSearchEnabled,
   sidebarOpen,
   newSession,
   selectSession,
   send,
+  pause,
+  resume,
   retry,
+  clearAllData,
 } = useAgentWorkbench();
 const chatPanel = ref<InstanceType<typeof ChatPanel> | null>(null);
 
@@ -59,6 +78,7 @@ function handleMaterialDeclaration(materialId: string, prepared: boolean): void 
       @close="sidebarOpen = false"
       @new-session="startSession"
       @select-session="selectSession"
+      @privacy="privacyOpen = true"
     />
 
     <main class="agent-main">
@@ -79,10 +99,14 @@ function handleMaterialDeclaration(materialId: string, prepared: boolean): void 
           :messages="messages"
           :draft="draft"
           :busy="busy"
+          :web-search="webSearch"
           :suggestions="suggestions"
           @open-sidebar="sidebarOpen = true"
           @update:draft="draft = $event"
+          @update:web-search="setWebSearchEnabled"
           @send="send($event)"
+          @pause="pause"
+          @resume="resume"
           @retry="retry"
         />
         <AgentWorkspace
@@ -93,6 +117,8 @@ function handleMaterialDeclaration(materialId: string, prepared: boolean): void 
           @material-declare="handleMaterialDeclaration"
         />
       </div>
+
+      <PrivacyDialog :open="privacyOpen" @close="acknowledgePrivacy" @clear="handleClearData" />
     </main>
   </div>
 </template>

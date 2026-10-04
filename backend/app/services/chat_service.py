@@ -12,7 +12,7 @@ import asyncio
 from app.agent.models import GovernmentAgentState
 from app.realtime_policy.models import RealtimeSearchStatus
 from app.agent.workflow import WorkflowAgent
-from app.models.chat import ChatData, ChatRequest
+from app.models.chat import ChatData, ChatRequest, WebSource
 from app.core.errors import LLMServiceError
 from app.services.llm.base import LLMMessage, LLMProvider
 from app.stores.session_store import InMemorySessionStore
@@ -30,6 +30,12 @@ from app.services.final_explanation_policy import (
     FinalExplanationDecision,
     FinalExplanationPolicy,
     FinalExplanationSkipReason,
+)
+from app.services.agent_reply_engine import (
+    AgentReplyEngine,
+    AgentReplyOutcome,
+    AgentReplyPolicy,
+    current_date_directive,
 )
 
 
@@ -68,10 +74,12 @@ class RequestTimings:
     material_updated: bool = False
     profile_extraction_calls: int = 0
     final_explanation_calls: int = 0
+    agent_reply_rounds: int = 0
+    agent_tool_calls: int = 0
 
 
 class ChatService:
-    def __init__(self, provider: LLMProvider, store: InMemorySessionStore, workflow_agent: WorkflowAgent, profile_extractor: LLMProfileExtractor | None = None, current_date: date | None = None, policy_repository: PolicyRepository | None = None, final_explanation_timeout_seconds: float = 12) -> None:
+    def __init__(self, provider: LLMProvider, store: InMemorySessionStore, workflow_agent: WorkflowAgent, profile_extractor: LLMProfileExtractor | None = None, current_date: date | None = None, policy_repository: PolicyRepository | None = None, final_explanation_timeout_seconds: float = 12, reply_engine: AgentReplyEngine | None = None) -> None:
         self._provider = provider
         self._store = store
         self._workflow_agent = workflow_agent
@@ -79,6 +87,7 @@ class ChatService:
         self._current_date = current_date
         self._policy_repository = policy_repository
         self._final_explanation_timeout_seconds = final_explanation_timeout_seconds
+        self._reply_engine = reply_engine
 
     async def _messages(
         self, request: ChatRequest, state: GovernmentAgentState
@@ -91,7 +100,7 @@ class ChatService:
         messages: list[LLMMessage] = [
             {
                 "role": "system",
-                "content": f"{SYSTEM_PROMPT}\n\n结构化 Agent State（唯一事实来源）：{agent_context}",
+                "content": f"{SYSTEM_PROMPT}\n\n{current_date_directive()}\n\n结构化 Agent State（唯一事实来源）：{agent_context}",
             },
             *history,
             {"role": "user", "content": user_message},
@@ -99,7 +108,12 @@ class ChatService:
         return user_message, messages
 
     @staticmethod
-    def _result(request: ChatRequest, state: GovernmentAgentState, reply: str) -> ChatData:
+    def _result(
+        request: ChatRequest,
+        state: GovernmentAgentState,
+        reply: str,
+        sources: list[WebSource] | None = None,
+    ) -> ChatData:
         return ChatData(
             sessionId=request.sessionId,
             replyText=reply,
@@ -110,6 +124,7 @@ class ChatService:
             eligibility=[result.model_dump(mode="json") for result in state.eligibilityResults],
             plan=state.overallPlan.model_dump(mode="json") if state.overallPlan else None,
             materialResults=state.materialResults,
+            sources=sources or [],
         )
 
     @staticmethod
@@ -230,6 +245,25 @@ class ChatService:
             return bool(state.candidatePolicies) and not state.needFollowUp
         return not any(term in reply for term in ("补贴", "见习", "贷款", "创业社会保险"))
 
+    async def _agent_reply(
+        self, request: ChatRequest, state: GovernmentAgentState, timings: RequestTimings
+    ) -> AgentReplyOutcome | None:
+        """Agent 自主回复引擎；未启用、不适用或失败时返回 None（调用方回退原有路径）。"""
+        if self._reply_engine is None or not self._provider.supports_tools:
+            return None
+        if not AgentReplyPolicy.decide(state, material_updated=timings.material_updated):
+            return None
+        timings.final_explanation_calls = 1
+        try:
+            history = await self._store.get_messages(request.sessionId, request.userId)
+            outcome = await self._reply_engine.generate(request, state, history)
+        except Exception:
+            logger.warning("agent_reply_failed trace fallback to deterministic reply", exc_info=True)
+            return None
+        timings.agent_reply_rounds = outcome.tool_rounds
+        timings.agent_tool_calls = outcome.tool_calls
+        return outcome
+
     async def _run_workflow(
         self, request: ChatRequest, timings: RequestTimings | None = None
     ) -> GovernmentAgentState:
@@ -338,7 +372,7 @@ class ChatService:
             "agent_request_timing trace_id=%s profile_extraction_ms=%d workflow_ms=%d "
             "final_explanation_ms=%d realtime_search_ms=%d request_total_ms=%d "
             "final_explanation_skipped=%s skip_reason=%s profile_extraction_calls=%d "
-            "final_explanation_calls=%d",
+            "final_explanation_calls=%d agent_reply_rounds=%d agent_tool_calls=%d",
             trace_id or "-",
             timings.profile_extraction_ms,
             timings.workflow_ms,
@@ -349,6 +383,8 @@ class ChatService:
             decision.skip_reason.value,
             timings.profile_extraction_calls,
             timings.final_explanation_calls,
+            timings.agent_reply_rounds,
+            timings.agent_tool_calls,
         )
 
     async def chat(self, request: ChatRequest, trace_id: str | None = None) -> ChatData:
@@ -359,7 +395,13 @@ class ChatService:
         user_message = request.message.strip()
         reply = self._fallback_reply(state, decision)
         explanation_started_at = perf_counter()
-        if decision.generate:
+        outcome = await self._agent_reply(request, state, timings)
+        if outcome is not None:
+            reply = outcome.reply
+            realtime_reply = self._realtime_reply(state)
+            if realtime_reply:
+                reply += "\n\n" + realtime_reply
+        elif decision.generate:
             timings.final_explanation_calls = 1
             try:
                 _, messages = await self._messages(request, state)
@@ -382,7 +424,10 @@ class ChatService:
             (perf_counter() - explanation_started_at) * 1000,
             (perf_counter() - request_started_at) * 1000,
         )
-        return self._result(request, state, reply)
+        return self._result(
+            request, state, reply,
+            sources=[WebSource(**source) for source in outcome.sources] if outcome else None,
+        )
 
     async def stream_chat(self, request: ChatRequest, trace_id: str | None = None) -> AsyncIterator[ChatStreamEvent]:
         request_started_at = perf_counter()
@@ -392,7 +437,11 @@ class ChatService:
         user_message = request.message.strip()
         chunks: list[str] = []
         explanation_started_at = perf_counter()
-        if decision.generate:
+        outcome = await self._agent_reply(request, state, timings)
+        if outcome is not None:
+            chunks = [outcome.reply]
+            yield ChatStreamEvent(kind="delta", text=outcome.reply)
+        elif decision.generate:
             timings.final_explanation_calls = 1
             try:
                 _, messages = await self._messages(request, state)
@@ -420,4 +469,10 @@ class ChatService:
             (perf_counter() - explanation_started_at) * 1000,
             (perf_counter() - request_started_at) * 1000,
         )
-        yield ChatStreamEvent(kind="done", data=self._result(request, state, reply))
+        yield ChatStreamEvent(
+            kind="done",
+            data=self._result(
+                request, state, reply,
+                sources=[WebSource(**source) for source in outcome.sources] if outcome else None,
+            ),
+        )

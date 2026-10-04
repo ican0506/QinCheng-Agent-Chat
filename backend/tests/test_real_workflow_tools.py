@@ -116,7 +116,7 @@ def test_stream_follow_up_can_emit_done_without_delta_and_keeps_contract() -> No
     events = parse_sse(response.text)
     assert [event for event, _ in events] == ["done"]
     data = events[-1][1]["data"]
-    assert set(data) == {"sessionId", "replyText", "needFollowUp", "followUpQuestions", "userProfile", "policies", "eligibility", "plan", "materialResults"}
+    assert set(data) == {"sessionId", "replyText", "needFollowUp", "followUpQuestions", "userProfile", "policies", "eligibility", "plan", "materialResults", "sources"}
     assert data["policies"]
     assert data["needFollowUp"] is True
     assert all(not policy["policyId"].startswith("DEMO-") for policy in data["policies"])

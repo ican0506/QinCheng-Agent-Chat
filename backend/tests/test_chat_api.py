@@ -110,7 +110,7 @@ def test_chat_returns_formal_contract_and_trace_id() -> None:
     data = body["data"]
     assert set(data) == {
         "sessionId", "replyText", "needFollowUp", "followUpQuestions", "userProfile",
-        "policies", "eligibility", "plan", "materialResults",
+        "policies", "eligibility", "plan", "materialResults", "sources",
     }
     assert data["sessionId"] == "session-12345678"
     assert data["replyText"]
