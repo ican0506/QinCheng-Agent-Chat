@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Bot, RotateCcw } from "@lucide/vue";
+import { Bot, Globe, Pause, RotateCcw } from "@lucide/vue";
 import DOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
 import type { ChatMessage } from "../types/agent";
@@ -11,6 +11,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   retry: [message: ChatMessage];
+  resume: [message: ChatMessage];
 }>();
 
 const markdown = new MarkdownIt({
@@ -34,11 +35,39 @@ const renderedContent = computed(() =>
       </div>
       <template v-else>
         <div
+          v-if="message.status === 'sending' && message.webSearch && !message.content"
+          class="searching-hint"
+          role="status"
+        >
+          <Globe :size="14" class="searching-icon" />
+          <span>联网搜索中…</span>
+        </div>
+        <div
           v-if="message.content"
           class="assistant-content markdown-body"
           :class="{ 'assistant-content--streaming': message.status === 'sending' }"
           v-html="renderedContent"
         ></div>
+        <div
+          v-if="message.sources && message.sources.length && message.status !== 'sending'"
+          class="sources-block"
+        >
+          <p class="sources-title">搜索来源</p>
+          <ol class="sources-list">
+            <li v-for="(source, index) in message.sources" :key="index">
+              <a :href="source.url" target="_blank" rel="noopener noreferrer">{{ source.title }}</a>
+            </li>
+          </ol>
+        </div>
+        <div v-if="message.status === 'paused'" class="paused-block" role="status">
+          <span class="paused-label">
+            <Pause :size="13" :stroke-width="2.2" />
+            已暂停生成
+          </span>
+          <button type="button" class="resume-button" @click="emit('resume', message)">
+            继续生成
+          </button>
+        </div>
         <div v-if="message.status === 'sending' && !message.content" class="typing" aria-label="正在回复">
           <span></span><span></span><span></span>
         </div>

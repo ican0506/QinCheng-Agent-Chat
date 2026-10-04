@@ -12,6 +12,7 @@ const emit = defineEmits<{
   close: [];
   newSession: [];
   selectSession: [sessionId: string];
+  privacy: [];
 }>();
 </script>
 
@@ -54,8 +55,14 @@ const emit = defineEmits<{
     </div>
 
     <div class="sidebar-footer">
-      <ShieldCheck :size="17" />
-      <span>政策结论须以官方数据为准</span>
+      <p class="sidebar-footer-line">
+        <ShieldCheck :size="17" />
+        <span>政策结论须以官方数据为准</span>
+      </p>
+      <button type="button" class="privacy-entry" @click="emit('privacy')">
+        <ShieldCheck :size="14" />
+        隐私与数据
+      </button>
     </div>
   </aside>
 </template>

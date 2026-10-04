@@ -62,6 +62,12 @@ class ChatRequest(BaseModel):
     userId: str = Field(min_length=1, max_length=128)
     message: str = Field(min_length=1, max_length=20_000)
     userProfile: UserProfile = Field(default_factory=UserProfile)
+    webSearch: bool = False
+
+
+class WebSource(BaseModel):
+    title: str
+    url: str
 
 
 class ChatData(BaseModel):
@@ -74,6 +80,7 @@ class ChatData(BaseModel):
     eligibility: list[dict[str, Any]] = Field(default_factory=list)
     plan: dict[str, Any] | None = None
     materialResults: list[MaterialCheckResult] = Field(default_factory=list)
+    sources: list[WebSource] = Field(default_factory=list)
 
 
 T = TypeVar("T")

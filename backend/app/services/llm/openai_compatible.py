@@ -15,7 +15,13 @@ from openai import (
 
 from app.core.config import Settings
 from app.core.errors import LLMServiceError, LLMTimeoutError
-from app.services.llm.base import LLMMessage, LLMProvider
+from app.services.llm.base import (
+    AgentMessage,
+    AgentToolCall,
+    AgentToolResponse,
+    LLMMessage,
+    LLMProvider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +41,10 @@ class OpenAICompatibleProvider(LLMProvider):
     @property
     def name(self) -> str:
         return "openai-compatible"
+
+    @property
+    def supports_tools(self) -> bool:
+        return True
 
     @staticmethod
     def _raise_provider_error(exc: Exception) -> NoReturn:
@@ -89,3 +99,35 @@ class OpenAICompatibleProvider(LLMProvider):
 
         if not has_content:
             raise LLMServiceError("模型服务返回了空内容，请重新发送")
+
+    async def complete_with_tools(
+        self, messages: list[AgentMessage], tools: list[dict]
+    ) -> AgentToolResponse:
+        try:
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=messages,
+                temperature=self._temperature,
+                max_tokens=self._max_tokens,
+                tools=tools,
+            )
+        except Exception as exc:
+            self._raise_provider_error(exc)
+
+        if not response.choices:
+            raise LLMServiceError("模型服务返回了空内容，请重新发送")
+        message = response.choices[0].message
+        raw_calls = getattr(message, "tool_calls", None) or []
+        tool_calls = [
+            AgentToolCall(
+                id=call.id or "",
+                name=call.function.name,
+                arguments=call.function.arguments or "{}",
+            )
+            for call in raw_calls
+            if call.function and call.function.name
+        ]
+        content = (message.content or "").strip() if message.content else ""
+        if not tool_calls and not content:
+            raise LLMServiceError("模型服务返回了空内容，请重新发送")
+        return AgentToolResponse(content=content or None, tool_calls=tool_calls)

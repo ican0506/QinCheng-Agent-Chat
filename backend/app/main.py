@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.agent.workflow import WorkflowAgent
 from app.agent.nodes.realtime_policy_search import RealtimePolicySearchNode
+from app.agent.reply_tools import ReplyToolRegistry
 from app.realtime_policy.provider import RealtimeSearchProvider, DisabledRealtimeSearchProvider
 from app.realtime_policy.tavily import TavilyRealtimeSearchProvider
 from app.realtime_policy.tool import OfficialRealtimePolicySearchTool
@@ -31,12 +32,16 @@ from app.rag.chunker import MarkdownPolicyChunker
 from app.rag.loader import RagDocumentLoader
 from app.rag.retriever import InMemoryRagRetriever
 from app.services.chat_service import ChatService
+from app.services.agent_reply_engine import AgentReplyEngine
+from app.web_search.tool import TavilyWebSearchProvider, WebSearchTool
 from app.services.llm_profile_extractor import LLMProfileExtractor
 from app.services.llm.base import LLMProvider, UnavailableLLMProvider
 from app.services.llm.openai_compatible import OpenAICompatibleProvider
 from app.stores.session_store import InMemorySessionStore
 
 logger = logging.getLogger(__name__)
+# 让应用模块 logger（agent_reply、profile_extraction、请求计时）输出到控制台。
+logging.basicConfig(level=logging.INFO)
 
 
 def _build_realtime_provider(settings: Settings) -> RealtimeSearchProvider:
@@ -66,6 +71,7 @@ def create_app(
     settings: Settings | None = None,
     provider: LLMProvider | None = None,
     realtime_provider: RealtimeSearchProvider | None = None,
+    web_search_tool: WebSearchTool | None = None,
 ) -> FastAPI:
     active_settings = settings or Settings.from_env()
     active_provider = provider
@@ -117,17 +123,18 @@ def create_app(
         if realtime_provider is not None
         else _build_realtime_provider(active_settings)
     )
+    realtime_tool = OfficialRealtimePolicySearchTool(
+        active_realtime_provider,
+        policy_repository, list(active_settings.realtime_policy_allowed_domains),
+        timeout_seconds=active_settings.realtime_policy_search_timeout_seconds,
+        max_results=active_settings.realtime_policy_search_max_results,
+    )
     workflow_agent = WorkflowAgent.production(
         policy_repository,
         policy_search_tool,
         DeterministicPolicyCompareTool(policy_repository, policy_relation_repository),
         DeterministicPlanTool(policy_repository),
-        RealtimePolicySearchNode(OfficialRealtimePolicySearchTool(
-            active_realtime_provider,
-            policy_repository, list(active_settings.realtime_policy_allowed_domains),
-            timeout_seconds=active_settings.realtime_policy_search_timeout_seconds,
-            max_results=active_settings.realtime_policy_search_max_results,
-        ), enabled=active_settings.realtime_policy_search_enabled),
+        RealtimePolicySearchNode(realtime_tool, enabled=active_settings.realtime_policy_search_enabled),
     )
     application = FastAPI(
         title="应届毕业生就业创业政策 Agent - Chat 模块",
@@ -146,6 +153,30 @@ def create_app(
         if active_settings.profile_extraction_enabled and active_settings.llm_configured
         else None
     )
+    reply_engine: AgentReplyEngine | None = None
+    if active_settings.agent_reply_enabled and active_settings.llm_configured:
+        injected_web_search_tool = web_search_tool
+        if injected_web_search_tool is None and active_settings.web_search_configured:
+            injected_web_search_tool = WebSearchTool(
+                TavilyWebSearchProvider(
+                    api_key=active_settings.web_search_api_key,
+                    timeout_seconds=active_settings.web_search_timeout_seconds,
+                ),
+                max_results=active_settings.web_search_max_results,
+            )
+        reply_registry = ReplyToolRegistry(
+            policy_repository,
+            policy_search_tool,
+            realtime_tool,
+            realtime_enabled=active_settings.realtime_policy_search_enabled,
+            web_search_tool=injected_web_search_tool,
+        )
+        reply_engine = AgentReplyEngine(
+            active_provider,
+            reply_registry,
+            timeout_seconds=active_settings.agent_reply_timeout_seconds,
+            max_tool_rounds=active_settings.agent_reply_max_tool_rounds,
+        )
     application.state.chat_service = ChatService(
         active_provider,
         store,
@@ -153,6 +184,7 @@ def create_app(
         profile_extractor,
         policy_repository=policy_repository,
         final_explanation_timeout_seconds=active_settings.final_explanation_timeout_seconds,
+        reply_engine=reply_engine,
     )
 
     application.add_middleware(

@@ -22,6 +22,13 @@ export interface ChatRequest {
   userId: string;
   message: string;
   userProfile: UserProfile;
+  webSearch?: boolean;
+}
+
+/** 联网搜索引用来源（Agent 调用 search_web 后返回）。 */
+export interface WebSource {
+  title: string;
+  url: string;
 }
 
 export interface ChatData {
@@ -34,6 +41,7 @@ export interface ChatData {
   eligibility: EligibilityResult[];
   plan: OverallPlan | null;
   materialResults: MaterialResult[];
+  sources?: WebSource[];
 }
 
 export type EligibilityStatus = "PASS" | "FAIL" | "UNKNOWN" | "MANUAL_REVIEW";
