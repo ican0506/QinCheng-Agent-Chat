@@ -7,7 +7,7 @@ import PrivacyDialog from "./components/PrivacyDialog.vue";
 import AgentWorkspace from "./components/workspace/AgentWorkspace.vue";
 import { useAgentWorkbench } from "./composables/useAgentWorkbench";
 import { materialDeclarationMessage } from "./workspace/materials";
-import type { MaterialResult } from "./types/chat";
+import type { MaterialResult, UserProfile } from "./types/chat";
 
 const PRIVACY_ACK_KEY = "graduate-policy-privacy-ack-v1";
 const privacyOpen = ref(!localStorage.getItem(PRIVACY_ACK_KEY));
@@ -46,9 +46,13 @@ const {
   pause,
   resume,
   retry,
+  updateProfile,
+  deleteSession,
   clearAllData,
 } = useAgentWorkbench();
 const chatPanel = ref<InstanceType<typeof ChatPanel> | null>(null);
+const profileSaving = ref(false);
+const profileError = ref("");
 
 function startSession(): void {
   newSession();
@@ -67,6 +71,26 @@ function handleMaterialDeclaration(materialId: string, prepared: boolean): void 
   mobileView.value = "chat";
   void send(materialDeclarationMessage(material as MaterialResult, prepared));
 }
+
+async function handleProfileSave(profile: UserProfile): Promise<void> {
+  profileSaving.value = true;
+  profileError.value = "";
+  try {
+    await updateProfile(profile);
+  } catch (error) {
+    profileError.value = error instanceof Error ? error.message : "画像保存失败，请稍后重试";
+  } finally {
+    profileSaving.value = false;
+  }
+}
+
+async function handleDeleteSession(sessionId: string): Promise<void> {
+  try {
+    await deleteSession(sessionId);
+  } catch (error) {
+    window.alert(error instanceof Error ? error.message : "删除对话失败，请稍后重试");
+  }
+}
 </script>
 
 <template>
@@ -78,6 +102,7 @@ function handleMaterialDeclaration(materialId: string, prepared: boolean): void 
       @close="sidebarOpen = false"
       @new-session="startSession"
       @select-session="selectSession"
+      @delete-session="handleDeleteSession"
       @privacy="privacyOpen = true"
     />
 
@@ -113,8 +138,11 @@ function handleMaterialDeclaration(materialId: string, prepared: boolean): void 
           :class="{ 'mobile-view-hidden': mobileView !== 'workspace' }"
           :data="latestChatData"
           :busy="busy"
+          :profile-saving="profileSaving"
+          :profile-error="profileError"
           @follow-up="handleFollowUp"
           @material-declare="handleMaterialDeclaration"
+          @profile-save="handleProfileSave"
         />
       </div>
 

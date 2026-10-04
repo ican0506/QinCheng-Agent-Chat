@@ -17,9 +17,13 @@ class ProfileUpdateParser:
                 result["education"] = education
                 break
 
-        graduation_match = re.search(r"(20\d{2})年(?:\d{1,2}月)?(?:毕业|应届)", message)
+        graduation_match = re.search(r"(20\d{2})年(?:(\d{1,2}|[一二三四五六七八九十]+)月(?:份)?)?(?:毕业|应届)", message)
         if graduation_match:
             result["graduationYear"] = int(graduation_match.group(1))
+            if graduation_match.group(2):
+                month = ProfileUpdateParser._parse_month(graduation_match.group(2))
+                if month is not None:
+                    result["graduationMonth"] = month
         else:
             explicit_year_match = re.search(r"毕业年份\s*(?:是|为|[:：])?\s*(20\d{2})", message)
             if explicit_year_match:
@@ -37,13 +41,21 @@ class ProfileUpdateParser:
             result["businessRegistrationMonths"] = int(registration.group(1))
         elif re.search(r"(?:公司|企业)?.{0,4}?(?:注册|登记).{0,8}?(?:一|1)年", message):
             result["businessRegistrationMonths"] = 12
-        if re.search(r"本市户籍|苏州市?户籍", message):
+        if re.search(r"(?:本市|苏州市?|昆山市?)户籍", message):
             result["residencyRegistration"] = "本市户籍"
         self_reported_unemployment = bool(
             re.search(r"(?:我|本人)(?:目前|现在)?(?:还在|正处于|处于)?待业(?:状态)?", message)
             or re.search(r"(?:目前待业|现在(?:还在)?待业|处于待业状态)", message)
         )
-        if "未就业" in message or "没找到工作" in message or self_reported_unemployment:
+        if (
+            "未就业" in message
+            or "暂未就业" in message
+            or "没找到工作" in message
+            or "目前没工作" in message
+            or "现在没工作" in message
+            or "待就业" in message
+            or self_reported_unemployment
+        ):
             result["employmentStatus"] = "待就业"
             result["unemploymentStatus"] = "未就业"
         elif "创业中" in message:
@@ -56,6 +68,15 @@ class ProfileUpdateParser:
         # 否定纠正必须最后覆盖前面由关键词子串得到的正向结果。
         result.update(ProfileUpdateParser.employment_status_overrides(message))
         return result
+
+    @staticmethod
+    def _parse_month(value: str) -> int | None:
+        if value.isdigit():
+            month = int(value)
+            return month if 1 <= month <= 12 else None
+        numerals = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
+                    "十一": 11, "十二": 12}
+        return numerals.get(value)
 
     @staticmethod
     def deterministic_overrides(message: str, current_date: date | None = None) -> dict[str, object]:

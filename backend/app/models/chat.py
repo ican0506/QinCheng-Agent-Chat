@@ -20,17 +20,19 @@ class UserProfile(BaseModel):
     city: str | None = None
     education: Literal["本科", "硕士", "专科", "其他"] | None = None
     graduationYear: int | None = None
+    # 用户只给到年月时不能伪造具体毕业日；月份单独保存供政策规则按年月使用。
+    graduationMonth: int | None = Field(default=None, ge=1, le=12)
     graduationDate: date | None = Field(default=None, exclude=True)
     employmentStatus: Literal["待就业", "已就业", "创业中"] | None = None
     isFirstTimeEntrepreneur: bool | None = None
     enterpriseRegisterDate: str | None = None
     businessRegistrationMonths: int | None = Field(default=None, exclude=True)
     socialInsuranceMonths: int | None = None
-    residencyRegistration: str | None = Field(default=None, exclude=True)
+    residencyRegistration: str | None = None
     unemploymentStatus: str | None = Field(default=None, exclude=True)
-    flexibleEmploymentInsurance: bool | None = Field(default=None, exclude=True)
+    flexibleEmploymentInsurance: bool | None = None
     jobSeekingIntent: bool | None = Field(default=None, exclude=True)
-    entrepreneurshipIntent: bool | None = Field(default=None, exclude=True)
+    entrepreneurshipIntent: bool | None = None
     hardshipIdentity: str | None = Field(default=None, exclude=True)
     housingStatus: Literal["租房", "自有", "其他"] | None = None
     fields: list[ProfileField] = Field(default_factory=list)
@@ -63,6 +65,15 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=20_000)
     userProfile: UserProfile = Field(default_factory=UserProfile)
     webSearch: bool = False
+
+
+class SessionProfileUpdateRequest(BaseModel):
+    """手动编辑当前会话画像；仅已显式提交的字段参与更新。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    userId: str = Field(min_length=1, max_length=128)
+    profile: UserProfile
 
 
 class WebSource(BaseModel):

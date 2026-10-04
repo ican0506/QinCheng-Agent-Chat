@@ -1,7 +1,7 @@
 import { computed, onMounted, ref, watch } from "vue";
-import { ChatApiError, streamChatMessage } from "../services/chatApi";
+import { ChatApiError, deleteAgentSession, streamChatMessage, updateSessionProfile } from "../services/chatApi";
 import type { ChatData } from "../types/chat";
-import { prependNewSession, saveLatestChatData } from "../workspace/sessionState";
+import { prependNewSession, removeSession, saveLatestChatData } from "../workspace/sessionState";
 import { ACTIVE_SESSION_KEY, readActiveSessionId, persistActiveSessionId } from "../workspace/activeSession";
 import type {
   ChatMessage,
@@ -247,6 +247,27 @@ export function useAgentWorkbench() {
     sidebarOpen.value = false;
   }
 
+  async function updateProfile(profile: ChatData["userProfile"]): Promise<void> {
+    const session = activeSession.value;
+    if (!session || busy.value) return;
+    const data = await updateSessionProfile(session.sessionId, userId, profile);
+    saveLatestChatData(session, data);
+  }
+
+  async function deleteSession(sessionId: string): Promise<void> {
+    const deletingActive = sessionId === activeSessionId.value;
+    if (deletingActive) {
+      controller?.abort();
+      cleanupStream();
+    }
+    await deleteAgentSession(sessionId, userId);
+    const next = removeSession(sessions.value, sessionId, activeSessionId.value);
+    sessions.value = next.sessions;
+    activeSessionId.value = next.activeSessionId;
+    draft.value = "";
+    if (sessions.value.length === 0) newSession();
+  }
+
   function updateTitle(session: ChatSession, text: string): void {
     if (session.title !== "新对话") return;
     const normalized = text.replace(/\s+/g, " ").trim();
@@ -301,7 +322,8 @@ export function useAgentWorkbench() {
           sessionId: session.sessionId,
           userId,
           message: content,
-          userProfile: session.latestChatData?.userProfile ?? {},
+          // 会话内画像以后端存储为准，避免旧 done.data 快照覆盖刚手动确认的值。
+          userProfile: {},
           webSearch: webSearch.value,
         },
         (chunk) => {
@@ -402,6 +424,8 @@ export function useAgentWorkbench() {
     sidebarOpen,
     newSession,
     selectSession,
+    updateProfile,
+    deleteSession,
     send,
     pause,
     resume,

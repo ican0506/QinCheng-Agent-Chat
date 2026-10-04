@@ -13,3 +13,18 @@ export function prependNewSession(
 export function saveLatestChatData(session: ChatSession, data: ChatData): void {
   session.latestChatData = data;
 }
+
+export function removeSession(
+  sessions: ChatSession[],
+  sessionId: string,
+  activeSessionId: string,
+): { sessions: ChatSession[]; activeSessionId: string } {
+  const remaining = sessions.filter((session) => session.sessionId !== sessionId);
+  if (sessionId !== activeSessionId) {
+    return { sessions: remaining, activeSessionId };
+  }
+  return {
+    sessions: remaining,
+    activeSessionId: remaining[0]?.sessionId ?? "",
+  };
+}

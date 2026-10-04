@@ -1,5 +1,5 @@
-import { getEligibilityByPolicyId, isPolicyMaterialReferenceOnly, profileDisplayItems, safeSourceUrl } from "../src/workspace/selectors.js";
-import { prependNewSession, saveLatestChatData } from "../src/workspace/sessionState.js";
+import { getEligibilityByPolicyId, isPolicyMaterialReferenceOnly, profileDisplayItems, profileMissingFields, safeSourceUrl } from "../src/workspace/selectors.js";
+import { prependNewSession, removeSession, saveLatestChatData } from "../src/workspace/sessionState.js";
 import { materialDeclarationMessage, materialStatusLabels, materialActions } from "../src/workspace/materials.js";
 import { formatWorkspaceText, missingFieldLabel } from "../src/workspace/display.js";
 import { readActiveSessionId, persistActiveSessionId } from "../src/workspace/activeSession.js";
@@ -53,6 +53,17 @@ assert(sessionsAfterCreate[0]?.sessionId === "session-new", "新建任务应立�
 assert(sessionsAfterCreate[0]?.messages.length === 0, "新会话不得继承历史消息");
 assert(sessionsAfterCreate[0]?.latestChatData === undefined, "新会话工作台必须为空");
 assert(sessionA.latestChatData === result, "新建任务不得清空原会话工作台结果");
+
+assert(profileMissingFields({ city: "苏州市", education: "本科", graduationYear: 2026, employmentStatus: "待就业" }).length === 0, "完整基础画像不得重复显示缺失项");
+assert(profileMissingFields({ city: "苏州市", education: "本科" }).join() === "毕业年份,当前就业状态", "缺失画像只列出当前真正缺失的字段");
+
+const removedNonActive = removeSession([sessionA, sessionB], "session-a", "session-b");
+assert(removedNonActive.sessions.map((session) => session.sessionId).join() === "session-b", "删除非当前会话只移除目标会话");
+assert(removedNonActive.activeSessionId === "session-b", "删除非当前会话不改变当前会话");
+const removedActive = removeSession([sessionA, sessionB], "session-a", "session-a");
+assert(removedActive.activeSessionId === "session-b", "删除当前会话应切换到剩余最近会话");
+const removedLast = removeSession([sessionA], "session-a", "session-a");
+assert(removedLast.sessions.length === 0 && removedLast.activeSessionId === "", "删除最后会话应进入空白新建任务状态");
 
 assert(materialActions("UNKNOWN", false).join() === "true,false", "待确认材料提供两个操作");
 assert(materialActions("READY", false).length === 0, "已准备材料不显示重复操作");
