@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from app.agent.models import GovernmentAgentState
 from app.realtime_policy.models import RealtimeSearchStatus
-from app.services.policy_query_context import PolicyDomainIntent, UserGoal
+from app.services.policy_query_context import ConversationIntent, PolicyDomainIntent, UserGoal
 
 
 class PresentationAdapter:
@@ -15,8 +15,8 @@ class PresentationAdapter:
         realtime = cls._realtime_reply(state)
         return local + ("\n\n" + realtime if realtime else "")
 
-    @staticmethod
-    def _realtime_reply(state: GovernmentAgentState) -> str:
+    @classmethod
+    def _realtime_reply(cls, state: GovernmentAgentState) -> str:
         status = state.realtimeSearchStatus
         if status is RealtimeSearchStatus.NOT_TRIGGERED:
             return ""
@@ -26,10 +26,11 @@ class PresentationAdapter:
             return "实时官方信息暂时无法检索，以下内容仅供参考。"
         if status is RealtimeSearchStatus.NO_RESULTS:
             return "已完成官方信息查询，当前未发现新的相关公开通知。"
-        if not state.realtimePolicyHits:
+        hits = cls._relevant_realtime_hits(state)
+        if not hits:
             return ""
         lines = ["相关官方公开信息："]
-        for hit in state.realtimePolicyHits:
+        for hit in hits:
             lines.extend([hit.title, "官方来源：" + hit.url])
             if hit.publishedAt:
                 lines.append("发布时间：" + hit.publishedAt.isoformat())
@@ -37,8 +38,24 @@ class PresentationAdapter:
                 lines.append("该通知尚未完成结构化核验，不能据此自动判断个人资格。")
         return "\n".join(lines)
 
+    @staticmethod
+    def _relevant_realtime_hits(state: GovernmentAgentState):
+        """将已检索结果与本轮主题再次对齐；不修改原始检索审计结果。"""
+        topics = (
+            "就业", "创业", "毕业", "见习", "社保", "社会保险", "补贴", "求职", "申报", "申请", "灵活就业",
+        )
+        requested = {topic for topic in topics if topic in state.userMessage}
+        if not requested:
+            return []
+        return [
+            hit for hit in state.realtimePolicyHits
+            if hit.relatedPolicyId is not None or any(topic in f"{hit.title} {hit.snippet}" for topic in requested)
+        ]
+
     @classmethod
     def _local_reply(cls, state: GovernmentAgentState) -> str:
+        if state.userGoal is UserGoal.CONVERSATIONAL:
+            return cls._conversational_reply(state)
         if state.domainIntent is PolicyDomainIntent.OUT_OF_SCOPE:
             return "当前助手主要支持高校毕业生就业创业政策咨询，暂不提供该主题的解答。"
         if state.candidatePolicies and all(
@@ -93,6 +110,32 @@ class PresentationAdapter:
         if not state.candidatePolicies:
             return "暂未找到与当前信息高度相关的政策，可以补充地区、毕业时间或就业创业情况后继续查询。"
         return "已完成政策匹配和初步资格辅助判断，请查看右侧工作台了解具体结果。"
+
+    @staticmethod
+    def _conversational_reply(state: GovernmentAgentState) -> str:
+        intent = state.conversationIntent
+        if intent is ConversationIntent.GREETING:
+            return "你好！我是青程 Agent，可以帮你了解高校毕业生就业创业政策、办理流程或资格判断。"
+        if intent is ConversationIntent.GRATITUDE:
+            return "不客气。需要了解政策、办理流程或资格判断时，随时告诉我。"
+        if intent is ConversationIntent.IDENTITY:
+            return "我是青程 Agent，主要协助高校毕业生了解就业创业政策、办理流程和资格判断。"
+        if intent is ConversationIntent.PAUSE:
+            return "好的，我先不查询政策。之后你想继续时，直接告诉我需要了解什么即可。"
+        if intent is ConversationIntent.CORRECTION:
+            known = []
+            labels = {
+                "city": "所在地区", "residencyRegistration": "户籍", "education": "学历",
+                "graduationYear": "毕业年份", "graduationMonth": "毕业月份", "employmentStatus": "就业状态",
+            }
+            for field, label in labels.items():
+                value = getattr(state.userProfile, field, None)
+                if value not in {None, ""}:
+                    known.append(f"{label}：{value}")
+            if not known:
+                return "你说得对。在你没有明确提供个人情况时，我不应该作个性化推断；目前我没有你的个人画像。"
+            return "我只会使用当前对话中你明确提供的信息：" + "；".join(known) + "。如果此前表达造成误解，抱歉；我不会自行补全你的个人情况。"
+        return "我在。你可以直接说想了解的就业创业政策、办理流程，或需要完成的事。"
 
     @staticmethod
     def _knowledge_notice(currentness: str) -> str:

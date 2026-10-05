@@ -5,7 +5,7 @@ from enum import Enum
 
 from app.agent.models import GovernmentAgentState
 from app.realtime_policy.models import RealtimeSearchStatus
-from app.services.policy_query_context import PolicyDomainIntent, PolicyQueryMode
+from app.services.policy_query_context import PolicyDomainIntent, PolicyQueryMode, UserGoal
 
 
 class FinalExplanationSkipReason(str, Enum):
@@ -17,6 +17,7 @@ class FinalExplanationSkipReason(str, Enum):
     MATERIAL_UPDATE = "MATERIAL_UPDATE"
     REALTIME_STATUS_ONLY = "REALTIME_STATUS_ONLY"
     FACT_QUERY = "FACT_QUERY"
+    CONVERSATIONAL = "CONVERSATIONAL"
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,8 @@ class FinalExplanationPolicy:
     def decide(
         state: GovernmentAgentState, *, material_updated: bool = False
     ) -> FinalExplanationDecision:
+        if state.userGoal is UserGoal.CONVERSATIONAL:
+            return FinalExplanationDecision(False, FinalExplanationSkipReason.CONVERSATIONAL)
         if state.domainIntent is PolicyDomainIntent.OUT_OF_SCOPE:
             return FinalExplanationDecision(False, FinalExplanationSkipReason.OUT_OF_SCOPE)
         base_profile_complete = all(

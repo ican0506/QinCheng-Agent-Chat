@@ -6,7 +6,13 @@ from pydantic import BaseModel, Field
 
 from app.models.chat import MaterialCheckResult, UserProfile
 from app.realtime_policy.models import RealtimePolicyHit, RealtimeSearchStatus
-from app.services.policy_query_context import PolicyDomainIntent, PolicyQueryMode, RouteDecision, UserGoal
+from app.services.policy_query_context import (
+    ConversationIntent,
+    PolicyDomainIntent,
+    PolicyQueryMode,
+    RouteDecision,
+    UserGoal,
+)
 
 
 class AgentStage(str, Enum):
@@ -135,6 +141,7 @@ class GovernmentAgentState(BaseModel):
     requestedGoal: UserGoal | None = None
     activeGoal: UserGoal | None = None
     activePolicy: str | None = None
+    conversationIntent: ConversationIntent | None = None
     policySearchQuery: str | None = None
     domainIntent: PolicyDomainIntent = PolicyDomainIntent.UNCERTAIN
     queryMode: PolicyQueryMode = PolicyQueryMode.UNCERTAIN
@@ -160,3 +167,27 @@ class GovernmentAgentState(BaseModel):
     realtimePolicyHits: list[RealtimePolicyHit] = Field(default_factory=list)
     realtimeSearchStatus: RealtimeSearchStatus = RealtimeSearchStatus.NOT_TRIGGERED
     realtimeSearchMs: float = 0
+
+    def reset_turn_results(self) -> None:
+        """清空只属于当前用户消息的计算结果，保留会话任务与画像。"""
+        self.routeDecision = RouteDecision()
+        self.conversationIntent = None
+        self.policyReferenceNotices = {}
+        self.stage = AgentStage.PROFILE_COLLECTING
+        self.candidatePolicies = []
+        self.knowledgeEvidences = []
+        self.eligibilityResults = []
+        self.policyRelations = []
+        self.overallPlan = None
+        self.materialResults = []
+        self.needFollowUp = False
+        self.followUpQuestions = []
+        self.nextAction = None
+        self.requiredFieldsForCurrentGoal = []
+        self.suggestedActions = []
+        self.finalReply = None
+        self.applicationGuide = False
+        self.errors = []
+        self.realtimePolicyHits = []
+        self.realtimeSearchStatus = RealtimeSearchStatus.NOT_TRIGGERED
+        self.realtimeSearchMs = 0

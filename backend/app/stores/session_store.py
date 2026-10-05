@@ -18,6 +18,7 @@ class SessionRecord:
     internal_profile: UserProfile = field(default_factory=UserProfile)
     policy_query_context: str | None = None
     user_goal: UserGoal | None = None
+    active_policy: str | None = None
     manual_profile_fields: set[str] = field(default_factory=set)
 
 
@@ -186,3 +187,22 @@ class InMemorySessionStore:
             elif record.user_id != user_id:
                 raise InvalidRequestError("sessionId 与 userId 不匹配")
             record.user_goal = goal
+
+    async def get_active_policy(self, session_id: str, user_id: str) -> str | None:
+        async with self._lock:
+            record = self._sessions.get(session_id)
+            if record is None:
+                return None
+            if record.user_id != user_id:
+                raise InvalidRequestError("sessionId 与 userId 不匹配")
+            return record.active_policy
+
+    async def set_active_policy(self, session_id: str, user_id: str, policy_id: str | None) -> None:
+        async with self._lock:
+            record = self._sessions.get(session_id)
+            if record is None:
+                record = SessionRecord(user_id=user_id)
+                self._sessions[session_id] = record
+            elif record.user_id != user_id:
+                raise InvalidRequestError("sessionId 与 userId 不匹配")
+            record.active_policy = policy_id

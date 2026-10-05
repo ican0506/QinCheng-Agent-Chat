@@ -105,6 +105,7 @@ class WorkflowAgent:
         timings: dict[str, float] | None = None,
         user_goal: UserGoal | None = None,
         active_goal: UserGoal | None = None,
+        active_policy: str | None = None,
     ) -> GovernmentAgentState:
         state = GovernmentAgentState(
             sessionId=session_id,
@@ -117,8 +118,12 @@ class WorkflowAgent:
             userGoal=user_goal or UserGoal.POLICY_DISCOVERY,
             requestedGoal=user_goal,
             activeGoal=active_goal,
+            activePolicy=active_policy,
             messages=[{"role": "user", "content": message}],
         )
+        # WorkflowAgent 可以被单测或服务层重复调用。显式重置本轮结果，避免
+        # 未来 State 构造方式变化时把证据、资格或计划误带入下一轮。
+        state.reset_turn_results()
         state = await self._graph.ainvoke(state)
         if timings is not None:
             timings["realtime_search_ms"] = state.realtimeSearchMs

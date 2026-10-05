@@ -11,7 +11,7 @@ from app.agent.reply_tools import ReplyToolContext, ReplyToolRegistry
 from app.models.chat import ChatRequest
 from app.realtime_policy.models import RealtimeSearchStatus
 from app.services.llm.base import AgentMessage, LLMProvider
-from app.services.policy_query_context import PolicyDomainIntent, PolicyQueryMode
+from app.services.policy_query_context import PolicyDomainIntent, PolicyQueryMode, UserGoal
 from app.services.model_context import ModelContextBuilder, QINGCHENG_SYSTEM_PROMPT, current_date_directive
 
 logger = logging.getLogger(__name__)
@@ -55,6 +55,8 @@ class AgentReplyPolicy:
 
     @staticmethod
     def decide(state: GovernmentAgentState, *, material_updated: bool = False) -> bool:
+        if state.userGoal is UserGoal.CONVERSATIONAL:
+            return False
         if state.domainIntent is PolicyDomainIntent.OUT_OF_SCOPE:
             return False
         if material_updated:
