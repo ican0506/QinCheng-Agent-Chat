@@ -21,8 +21,10 @@ class PolicySearchNode:
         else:
             state.candidatePolicies = await self._tool.search(state.userProfile, query)
         state.candidatePolicies = self._ranker.rank(state.userGoal, state.candidatePolicies)
-        state.activePolicy = (
-            state.candidatePolicies[0].policyId if state.candidatePolicies else None
-        )
+        if state.targetPolicyId and any(p.policyId == state.targetPolicyId for p in state.candidatePolicies):
+            state.candidatePolicies.sort(key=lambda p: p.policyId != state.targetPolicyId)
+            state.activePolicy = state.targetPolicyId
+        else:
+            state.activePolicy = state.candidatePolicies[0].policyId if state.candidatePolicies else state.activePolicy
         state.stage = AgentStage.ELIGIBILITY_CHECKING
         return state

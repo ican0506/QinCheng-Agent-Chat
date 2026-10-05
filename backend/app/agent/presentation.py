@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from app.agent.models import GovernmentAgentState
+from app.agent.realtime_relevance import relevant_realtime_hits
 from app.realtime_policy.models import RealtimeSearchStatus
 from app.services.policy_query_context import ConversationIntent, PolicyDomainIntent, UserGoal
 
@@ -41,16 +42,7 @@ class PresentationAdapter:
     @staticmethod
     def _relevant_realtime_hits(state: GovernmentAgentState):
         """将已检索结果与本轮主题再次对齐；不修改原始检索审计结果。"""
-        topics = (
-            "就业", "创业", "毕业", "见习", "社保", "社会保险", "补贴", "求职", "申报", "申请", "灵活就业",
-        )
-        requested = {topic for topic in topics if topic in state.userMessage}
-        if not requested:
-            return []
-        return [
-            hit for hit in state.realtimePolicyHits
-            if hit.relatedPolicyId is not None or any(topic in f"{hit.title} {hit.snippet}" for topic in requested)
-        ]
+        return relevant_realtime_hits(state, limit=3)
 
     @classmethod
     def _local_reply(cls, state: GovernmentAgentState) -> str:
@@ -58,20 +50,32 @@ class PresentationAdapter:
             return cls._conversational_reply(state)
         if state.domainIntent is PolicyDomainIntent.OUT_OF_SCOPE:
             return "当前助手主要支持高校毕业生就业创业政策咨询，暂不提供该主题的解答。"
-        if state.candidatePolicies and all(
-            policy.policyId in state.policyReferenceNotices for policy in state.candidatePolicies
+        policies = cls._display_policies(state)
+        # 找工作优先给行动方向；历史补贴记录只能作为补充，不能抢占主回答。
+        if state.userGoal is UserGoal.JOB_SEARCH:
+            hits = cls._relevant_realtime_hits(state)
+            lines = ["如果你的目标是尽快找工作，可优先关注高校毕业生招聘、官方就业服务和就业见习机会。"]
+            if hits:
+                lines.append("当前可关注的官方就业服务信息：")
+                lines.extend(f"- {hit.title}：{hit.url}" for hit in hits)
+            else:
+                lines.append("可先通过当地人社部门就业服务平台、学校就业指导中心和就业见习项目了解岗位对接与招聘活动。")
+            lines.append("下一步可先查看就业见习要求，或查询当地近期高校毕业生招聘活动。")
+            return "\n".join(lines)
+        if policies and all(
+            policy.policyId in state.policyReferenceNotices for policy in policies
         ):
-            if len(state.candidatePolicies) == 1:
-                return state.policyReferenceNotices[state.candidatePolicies[0].policyId]
+            if len(policies) == 1:
+                return state.policyReferenceNotices[policies[0].policyId]
             return "\n\n".join(
                 f"《{policy.name}》：{state.policyReferenceNotices[policy.policyId]}"
-                for policy in state.candidatePolicies
+                for policy in policies
             )
         if state.userGoal is UserGoal.POLICY_FACT:
-            if not state.candidatePolicies and not state.knowledgeEvidences:
+            if not policies and not state.knowledgeEvidences:
                 return "暂未找到与该问题高度相关的政策资料。"
             lines = ["已找到以下政策资料："]
-            for policy in state.candidatePolicies:
+            for policy in policies:
                 lines.append(f"《{policy.name}》")
                 if policy.conditions:
                     lines.append("申请条件：" + "；".join(policy.conditions))
@@ -90,14 +94,15 @@ class PresentationAdapter:
                 ])
             lines.append("以上为政策事实说明，不代表对您个人资格的判断。")
             return "\n".join(lines)
-        if state.userGoal is UserGoal.JOB_SEARCH:
-            names = "、".join(policy.name for policy in state.candidatePolicies[:2])
-            return f"如果你的目标是尽快找工作，当前可优先关注{names or '就业服务和高校毕业生就业支持'}。"
         if state.userGoal is UserGoal.POLICY_DISCOVERY:
-            names = "、".join(policy.name for policy in state.candidatePolicies[:3])
-            return f"根据你目前提供的信息，可先了解：{names or '高校毕业生就业创业支持'}。"
-        if state.userGoal is UserGoal.APPLICATION_GUIDE and state.candidatePolicies:
-            policy = state.candidatePolicies[0]
+            names = "、".join(policy.name for policy in policies[:3])
+            has_profile = any(getattr(state.userProfile, field, None) not in {None, ""} for field in (
+                "city", "education", "graduationYear", "graduationMonth", "employmentStatus",
+            ))
+            prefix = "根据你目前已确认的信息" if has_profile else "目前可优先了解"
+            return f"{prefix}：{names or '高校毕业生就业创业支持'}。"
+        if state.userGoal is UserGoal.APPLICATION_GUIDE and policies:
+            policy = policies[0]
             parts = [f"《{policy.name}》可按以下流程了解和办理："]
             if policy.process:
                 parts.append("办理流程：" + "；".join(policy.process))
@@ -107,9 +112,15 @@ class PresentationAdapter:
             return "\n".join(parts)
         if state.needFollowUp and state.followUpQuestions:
             return "要判断你是否符合当前政策，还需要确认：" + "；".join(state.followUpQuestions)
-        if not state.candidatePolicies:
+        if not policies:
             return "暂未找到与当前信息高度相关的政策，可以补充地区、毕业时间或就业创业情况后继续查询。"
         return "已完成政策匹配和初步资格辅助判断，请查看右侧工作台了解具体结果。"
+
+    @staticmethod
+    def _display_policies(state: GovernmentAgentState):
+        if state.targetPolicyId:
+            return [policy for policy in state.candidatePolicies if policy.policyId == state.targetPolicyId]
+        return state.candidatePolicies
 
     @staticmethod
     def _conversational_reply(state: GovernmentAgentState) -> str:

@@ -59,7 +59,7 @@ class GoalResolver:
         if PolicyDomainIntentDetector.detect(message) is PolicyDomainIntent.OUT_OF_SCOPE:
             return UserGoal.OUT_OF_SCOPE
         # 明确的新目标始终先于“沿用上一轮”。
-        if re.search(r"先不(?:管|考虑).*(?:补贴|资格)|只想找工作|不想申请补贴|先不用判断资格", message):
+        if re.search(r"先不(?:管|考虑).*(?:补贴|资格)|只想(?:找工作|就业)|不想(?:创业|申请补贴)|先不用判断资格", message):
             return UserGoal.JOB_SEARCH
         # 材料准备情况是正在办理/资格判断任务的会话内回复；材料名称常含“申请”，
         # 必须在办理指南路由前识别，避免丢失当前资格任务及其材料状态。
@@ -67,7 +67,13 @@ class GoalResolver:
             r"已经准备好|准备好了|准备好|已准备|还没有|没准备|未准备|我有|已有", message
         ):
             return UserGoal.FOLLOW_UP_REPLY
-        if re.search(r"怎么(?:办理|申请|申领)|如何(?:办理|申请|申领)|办理流程|申请流程", message):
+        # 有明确上下文的短追问不是普通“沿用上一轮”。先识别其实际业务动作，
+        # 由 Graph 使用 activePolicy 锁定同一条结构化政策。
+        if previous is not None and re.fullmatch(r"\s*(?:那)?(?:我)?(?:可以吗|符合吗|能(?:申请|申领)?吗)\s*[？?。！!]*\s*", message):
+            return UserGoal.ELIGIBILITY_CHECK
+        if previous is not None and re.fullmatch(r"\s*(?:那)?(?:需要|要)?(?:准备)?什么材料|(?:那)?去哪里申请|(?:那)?怎么办理\s*[？?。！!]*\s*", message):
+            return UserGoal.APPLICATION_GUIDE
+        if re.search(r"怎么(?:办理|申请|申领)|如何(?:办理|申请|申领)|办理流程|申请流程|去哪里申请|什么材料|准备什么材料", message):
             return UserGoal.APPLICATION_GUIDE
         query_mode = PolicyQueryModeDetector.detect(message)
         if query_mode is PolicyQueryMode.PERSONALIZED_QUERY:
@@ -76,11 +82,11 @@ class GoalResolver:
             return UserGoal.POLICY_FACT
         if re.search(r"(?:继续|我要|我想)?申请.*(?:补贴|政策)", message):
             return UserGoal.ELIGIBILITY_CHECK
-        if re.search(r"我(?:是否|能否|能不能|符合)|帮我判断.*(?:资格|符合)|我.*符合.*(?:补贴|政策)", message):
+        if re.search(r"我(?:是否|能否|能不能|符合)|可以吗|帮我判断.*(?:资格|符合)|我.*符合.*(?:补贴|政策)", message):
             return UserGoal.ELIGIBILITY_CHECK
         if re.search(r"灵活就业|自己.*(?:交|缴).*(?:社保|社会保险)|(?:社保|社会保险).*补贴", message):
             return UserGoal.POLICY_DISCOVERY
-        if re.search(r"只想找工作|找工作|找单位就业|就业服务|求职", message) and not re.search(r"补贴.*(?:条件|资格|申请)", message):
+        if re.search(r"只想(?:找工作|就业)|找工作|找单位就业|就业服务|求职", message) and not re.search(r"补贴.*(?:条件|资格|申请)", message):
             return UserGoal.JOB_SEARCH
         if ProfileOnlyUpdateDetector.detect(message):
             if previous is not None:
@@ -202,6 +208,7 @@ class PolicyQueryModeDetector:
         ))
         fact_signal = bool(re.search(
             r"条件|材料|流程|办理|申报时间|截止|什么时候|现在还能申请|现在还能申领|窗口开了吗|"
+            r"多少钱|补贴标准|标准|是什么|含义|"
             r"有什么补贴|有哪些补贴|适合哪些(?:毕业生|人群)?",
             message,
         ))

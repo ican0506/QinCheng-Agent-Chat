@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, Field
 
 from app.agent.models import GovernmentAgentState
+from app.agent.realtime_relevance import relevant_realtime_hits
 from app.services.llm.base import AgentMessage, LLMMessage
 from app.services.policy_query_context import UserGoal
 
@@ -151,7 +152,10 @@ class ModelContextBuilder:
 
     def _policies(self, state: GovernmentAgentState, *, include_application: bool) -> list[dict[str, object]]:
         result: list[dict[str, object]] = []
-        for policy in state.candidatePolicies[:self._evidence_limit]:
+        policies = state.candidatePolicies
+        if state.targetPolicyId:
+            policies = [policy for policy in policies if policy.policyId == state.targetPolicyId]
+        for policy in policies[:self._evidence_limit]:
             item: dict[str, object] = {
                 "政策名称": policy.name, "摘要": policy.summary,
                 "申请条件": policy.conditions, "官方来源": policy.sourceUrl,
@@ -163,7 +167,7 @@ class ModelContextBuilder:
 
     def _evidence(self, state: GovernmentAgentState) -> list[dict[str, str]]:
         evidence: list[dict[str, str]] = []
-        for hit in state.realtimePolicyHits[:self._evidence_limit]:
+        for hit in relevant_realtime_hits(state, limit=self._evidence_limit):
             item = {
                 "政策名称": hit.title, "来源标题": hit.title,
                 "来源机构": hit.department or hit.domain,
