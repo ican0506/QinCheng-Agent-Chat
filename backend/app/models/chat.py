@@ -81,6 +81,11 @@ class WebSource(BaseModel):
     url: str
 
 
+class SuggestedAction(BaseModel):
+    label: str
+    prompt: str
+
+
 class ChatData(BaseModel):
     sessionId: str
     replyText: str
@@ -92,6 +97,8 @@ class ChatData(BaseModel):
     plan: dict[str, Any] | None = None
     materialResults: list[MaterialCheckResult] = Field(default_factory=list)
     sources: list[WebSource] = Field(default_factory=list)
+    suggestedActions: list[SuggestedAction] = Field(default_factory=list)
+    applicationGuide: bool = False
 
 
 T = TypeVar("T")

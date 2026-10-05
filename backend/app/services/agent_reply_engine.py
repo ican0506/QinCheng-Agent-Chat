@@ -272,11 +272,17 @@ class AgentReplyEngine:
             ):
                 logger.info("agent_reply_grounding_reject reason=unknown_policy_name name=%s", name)
                 return False
+        amount_match = _INVENTED_AMOUNT_PATTERN.search(reply)
+        if amount_match and not (
+            amount_match.group(0) in state_text
+            or any(amount_match.group(0) in text for text in context.tool_result_texts)
+        ):
+            logger.info("agent_reply_grounding_reject reason=ungrounded_amount")
+            return False
         # 旧硬规则：画像不足的追问场景，禁止无来源的具体政策推荐或编造补贴金额。
         # 联网搜索结果自带来源与金额，属于有据引用，不做该限制。
         if (
             not state.candidatePolicies
-            and state.needFollowUp
             and not context.allowed_policy_ids
             and not context.web_search_results
         ):

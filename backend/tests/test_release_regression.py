@@ -72,12 +72,13 @@ def test_follow_up_profile_is_retained_server_side_across_turns() -> None:
 
 def test_follow_up_guard_rejects_llm_policy_recommendations() -> None:
     client = TestClient(create_app(settings(), MisleadingProvider()))
-    response = client.post("/api/agent/chat", json=payload("我想咨询政策", {"city": None, "education": None, "graduationYear": None, "employmentStatus": None}))
+    response = client.post("/api/agent/chat", json=payload("我符合创业社会保险补贴吗？", {"city": None, "education": None, "graduationYear": None, "employmentStatus": None}))
     data = response.json()["data"]
     assert data["needFollowUp"] is True
-    assert data["policies"] == []
+    assert data["policies"]
+    assert data["eligibility"]
     assert "推荐求职创业补贴" not in data["replyText"]
-    assert "补充" in data["replyText"]
+    assert any("毕业日期" in question for question in data["followUpQuestions"])
 
 
 def test_historical_closed_policy_uses_deterministic_current_notice() -> None:
@@ -102,7 +103,7 @@ def test_historical_closed_policy_uses_deterministic_current_notice() -> None:
 
     assert data["needFollowUp"] is False
     assert "后续发布的2025届" not in data["replyText"]
-    assert data["replyText"] == "当前知识库中的该记录为历史申报通知，申报窗口已结束。请关注苏州市人社部门后续发布的最新年度申报安排。"
+    assert data["replyText"] == "该记录为历史申报通知，申报窗口已结束。请关注苏州市人社部门后续发布的最新年度申报安排。"
 
 
 def test_server_profile_is_accumulated_across_browser_style_three_turns() -> None:
@@ -115,7 +116,7 @@ def test_server_profile_is_accumulated_across_browser_style_three_turns() -> Non
         json={
             "sessionId": session_id,
             "userId": user_id,
-            "message": "我是今年毕业生，想了解本地就业补贴",
+            "message": "我符合灵活就业社会保险补贴吗？",
             "userProfile": {},
         },
     ).json()["data"]
@@ -235,6 +236,7 @@ def test_material_declaration_round_trip_returns_ready_and_persists_per_session(
         "city": "苏州市",
         "education": "本科",
         "graduationYear": 2025,
+        "graduationDate": "2025-06-20",
         "employmentStatus": "创业中",
         "socialInsuranceMonths": 12,
         "businessRegistrationMonths": 12,
@@ -244,7 +246,7 @@ def test_material_declaration_round_trip_returns_ready_and_persists_per_session(
         json={
             "sessionId": session_id,
             "userId": user_id,
-            "message": "我想申请创业社会保险补贴",
+            "message": "我符合创业社会保险补贴吗？",
             "userProfile": profile,
         },
     ).json()["data"]
@@ -267,7 +269,7 @@ def test_material_declaration_round_trip_returns_ready_and_persists_per_session(
         json={
             "sessionId": session_id,
             "userId": user_id,
-            "message": "继续查询创业社会保险补贴",
+            "message": "继续判断我是否符合创业社会保险补贴",
             "userProfile": {},
         },
     ).json()["data"]
@@ -279,7 +281,7 @@ def test_material_declaration_round_trip_returns_ready_and_persists_per_session(
         json={
             "sessionId": "material-declaration-other-session",
             "userId": user_id,
-            "message": "我想申请创业社会保险补贴",
+            "message": "我符合创业社会保险补贴吗？",
             "userProfile": profile,
         },
     ).json()["data"]

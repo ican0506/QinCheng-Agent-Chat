@@ -116,7 +116,7 @@ def test_stream_follow_up_can_emit_done_without_delta_and_keeps_contract() -> No
     events = parse_sse(response.text)
     assert [event for event, _ in events] == ["done"]
     data = events[-1][1]["data"]
-    assert set(data) == {"sessionId", "replyText", "needFollowUp", "followUpQuestions", "userProfile", "policies", "eligibility", "plan", "materialResults", "sources"}
+    assert set(data) == {"sessionId", "replyText", "needFollowUp", "followUpQuestions", "userProfile", "policies", "eligibility", "plan", "materialResults", "sources", "suggestedActions", "applicationGuide"}
     assert data["policies"]
     assert data["needFollowUp"] is True
     assert all(not policy["policyId"].startswith("DEMO-") for policy in data["policies"])
@@ -128,12 +128,11 @@ def test_chat_and_sse_return_material_results_from_real_policy_records() -> None
         "graduationDate": "2025-06-30", "businessRegistrationMonths": 12,
     })
     chat_data = client.post("/api/agent/chat", json=request).json()["data"]
-    assert chat_data["materialResults"]
-    assert all(item["source"] == "POLICY" for item in chat_data["materialResults"])
-    assert all(item["status"] in {"UNKNOWN", "READY", "MISSING", "MANUAL_REVIEW"} for item in chat_data["materialResults"])
+    # 缺少连续社保月份时，资格尚未通过，不得自动生成材料状态。
+    assert chat_data["materialResults"] == []
 
     stream_data = parse_sse(client.post("/api/agent/chat/stream", json=request).text)[-1][1]["data"]
-    assert stream_data["materialResults"]
+    assert stream_data["materialResults"] == []
 
 
 def test_production_chat_uses_rag_evidence_for_real_policy_recall() -> None:

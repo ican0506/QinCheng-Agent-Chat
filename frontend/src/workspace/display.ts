@@ -22,6 +22,7 @@ export function missingFieldLabel(field: string): string {
 export function formatWorkspaceText(text: string): string {
   return text
     .replace(/(?:政策\s*ID|policyId)\s*[：:]\s*[\w-]+\s*/gi, "")
+    .replace(/(?:Dify\s*)?知识库命中原文片段/g, "匹配到政策原文")
     .replace(/RAG\s*命中/g, "匹配")
     .replace(/[（(]相关度\s*[\d.]+[）)]/g, "")
     .replace(/(?:ragScore|RAG\s*相关度)\s*[：:]?\s*[\d.]+/gi, "")

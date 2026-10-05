@@ -4,6 +4,8 @@ from __future__ import annotations
 import re
 from enum import Enum
 
+from pydantic import BaseModel
+
 from app.services.profile_update_parser import ProfileUpdateParser
 
 
@@ -19,6 +21,109 @@ class PolicyQueryMode(str, Enum):
     PROFILE_UPDATE = "PROFILE_UPDATE"
     OUT_OF_SCOPE = "OUT_OF_SCOPE"
     UNCERTAIN = "UNCERTAIN"
+
+
+class UserGoal(str, Enum):
+    """当前轮对话要完成的用户任务；仅用于后端调度。"""
+
+    POLICY_FACT = "POLICY_FACT"
+    POLICY_DISCOVERY = "POLICY_DISCOVERY"
+    JOB_SEARCH = "JOB_SEARCH"
+    ELIGIBILITY_CHECK = "ELIGIBILITY_CHECK"
+    APPLICATION_GUIDE = "APPLICATION_GUIDE"
+    PROFILE_UPDATE = "PROFILE_UPDATE"
+    FOLLOW_UP_REPLY = "FOLLOW_UP_REPLY"
+    OUT_OF_SCOPE = "OUT_OF_SCOPE"
+
+
+class RouteDecision(BaseModel):
+    """当前轮允许使用的能力；由 GoalResolver 的结果唯一决定。"""
+
+    needsProfileGate: bool = False
+    runPolicySearch: bool = False
+    runEligibility: bool = False
+    runMaterialCheck: bool = False
+    runPlan: bool = False
+    allowKnowledgeEvidence: bool = False
+    generateSuggestions: bool = False
+
+
+class GoalResolver:
+    """集中解析用户当前目标，明确表达优先于会话中的上一目标。"""
+
+    @staticmethod
+    def resolve(message: str, previous: UserGoal | None = None) -> UserGoal:
+        if PolicyDomainIntentDetector.detect(message) is PolicyDomainIntent.OUT_OF_SCOPE:
+            return UserGoal.OUT_OF_SCOPE
+        # 明确的新目标始终先于“沿用上一轮”。
+        if re.search(r"先不(?:管|考虑).*(?:补贴|资格)|只想找工作|不想申请补贴|先不用判断资格", message):
+            return UserGoal.JOB_SEARCH
+        # 材料准备情况是正在办理/资格判断任务的会话内回复；材料名称常含“申请”，
+        # 必须在办理指南路由前识别，避免丢失当前资格任务及其材料状态。
+        if previous is UserGoal.ELIGIBILITY_CHECK and re.search(
+            r"已经准备好|准备好了|准备好|已准备|还没有|没准备|未准备|我有|已有", message
+        ):
+            return UserGoal.FOLLOW_UP_REPLY
+        if re.search(r"怎么(?:办理|申请|申领)|如何(?:办理|申请|申领)|办理流程|申请流程", message):
+            return UserGoal.APPLICATION_GUIDE
+        query_mode = PolicyQueryModeDetector.detect(message)
+        if query_mode is PolicyQueryMode.PERSONALIZED_QUERY:
+            return UserGoal.ELIGIBILITY_CHECK
+        if query_mode is PolicyQueryMode.FACT_QUERY:
+            return UserGoal.POLICY_FACT
+        if re.search(r"(?:继续|我要|我想)?申请.*(?:补贴|政策)", message):
+            return UserGoal.ELIGIBILITY_CHECK
+        if re.search(r"我(?:是否|能否|能不能|符合)|帮我判断.*(?:资格|符合)|我.*符合.*(?:补贴|政策)", message):
+            return UserGoal.ELIGIBILITY_CHECK
+        if re.search(r"灵活就业|自己.*(?:交|缴).*(?:社保|社会保险)|(?:社保|社会保险).*补贴", message):
+            return UserGoal.POLICY_DISCOVERY
+        if re.search(r"只想找工作|找工作|找单位就业|就业服务|求职", message) and not re.search(r"补贴.*(?:条件|资格|申请)", message):
+            return UserGoal.JOB_SEARCH
+        if ProfileOnlyUpdateDetector.detect(message):
+            if previous is not None:
+                return UserGoal.FOLLOW_UP_REPLY
+            return UserGoal.PROFILE_UPDATE
+        if re.search(r"有什么(?:就业|创业)?(?:支持|政策|补贴)|哪些(?:就业|创业)?(?:支持|政策|补贴)|就业支持", message):
+            return UserGoal.POLICY_DISCOVERY
+        if re.search(r"那下一步|下一步.*(?:干什么|怎么做)|接下来", message) and previous is not None:
+            return UserGoal.FOLLOW_UP_REPLY
+        return UserGoal.POLICY_DISCOVERY
+
+
+class RouteDecider:
+    """将目标转换为能力许可，不在节点中重复判断自然语言。"""
+
+    @staticmethod
+    def decide(goal: UserGoal, previous_goal: UserGoal | None = None) -> RouteDecision:
+        effective_goal = previous_goal if goal is UserGoal.FOLLOW_UP_REPLY and previous_goal else goal
+        if effective_goal is UserGoal.ELIGIBILITY_CHECK:
+            return RouteDecision(
+                needsProfileGate=True,
+                runPolicySearch=True,
+                runEligibility=True,
+                runMaterialCheck=True,
+                runPlan=True,
+                generateSuggestions=True,
+            )
+        if effective_goal is UserGoal.POLICY_FACT:
+            return RouteDecision(
+                runPolicySearch=True,
+                allowKnowledgeEvidence=True,
+                generateSuggestions=True,
+            )
+        if effective_goal is UserGoal.APPLICATION_GUIDE:
+            return RouteDecision(runPolicySearch=True, generateSuggestions=True)
+        if effective_goal in {UserGoal.POLICY_DISCOVERY, UserGoal.JOB_SEARCH}:
+            return RouteDecision(runPolicySearch=True, generateSuggestions=True)
+        return RouteDecision()
+
+
+class UserGoalDetector:
+    """旧调用点兼容层；新的业务代码应使用 GoalResolver。"""
+
+    @staticmethod
+    def detect(message: str, previous: UserGoal | None = None) -> UserGoal:
+        return GoalResolver.resolve(message, previous)
 
 
 class PolicyQueryModeDetector:

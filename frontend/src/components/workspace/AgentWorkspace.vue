@@ -10,7 +10,7 @@ import { computed } from "vue";
 import { isPolicyMaterialReferenceOnly } from "../../workspace/selectors";
 
 const props = defineProps<{ data?: ChatData; busy: boolean; profileSaving?: boolean; profileError?: string }>();
-const emit = defineEmits<{ followUp: [question: string]; materialDeclare: [materialId: string, prepared: boolean]; profileSave: [profile: UserProfile] }>();
+const emit = defineEmits<{ followUp: [question: string]; materialDeclare: [materialId: string, prepared: boolean]; profileSave: [profile: UserProfile]; suggestedAction: [prompt: string] }>();
 const policyNames = computed(() => Object.fromEntries((props.data?.policies ?? []).map((policy) => [policy.policyId, policy.name])));
 const referenceOnlyPolicyIds = computed(() => new Set(
   (props.data?.policies ?? [])
@@ -43,9 +43,13 @@ function declareMaterial(material: MaterialResult, prepared: boolean): void {
       <template v-if="data">
         <ProfileSummaryBlock :profile="data.userProfile" :saving="profileSaving" :error="profileError" @save="emit('profileSave', $event)" />
         <FollowUpBlock v-if="data.needFollowUp && data.followUpQuestions.length" :questions="data.followUpQuestions" @select="emit('followUp', $event)" />
-        <PolicyResultList :policies="data.policies" :data="data" />
-        <MaterialChecklist :results="data.materialResults" :policy-names="policyNames" :reference-policy-ids="referenceOnlyPolicyIds" :busy="busy" @declare="declareMaterial" />
-        <PlanTimeline :plan="data.plan" />
+        <PolicyResultList :policies="data.policies" :data="data" :show-application-guide="data.applicationGuide === true" />
+        <section v-if="data.suggestedActions?.length" class="workspace-section action-section">
+          <div class="action-title"><strong>接下来可以了解</strong></div>
+          <div class="follow-up-list"><button v-for="action in data.suggestedActions" :key="action.prompt" type="button" @click="emit('suggestedAction', action.prompt)">{{ action.label }}</button></div>
+        </section>
+        <MaterialChecklist v-if="data.materialResults.length" :results="data.materialResults" :policy-names="policyNames" :reference-policy-ids="referenceOnlyPolicyIds" :busy="busy" @declare="declareMaterial" />
+        <PlanTimeline v-if="data.plan?.steps.length" :plan="data.plan" />
       </template>
     </div>
   </aside>

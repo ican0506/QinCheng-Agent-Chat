@@ -84,7 +84,7 @@ def test_browser_negative_intent_refreshes_candidates_materials_plan_and_follow_
     assert not ids & {'suzhou-startup-social-2021', 'suzhou-startup-one-time-2023'}
     assert all(m['policyId'] in ids for m in data['materialResults'])
     assert not any('经营主体' in q or '首次创业' in q or '灵活就业方式参保' in q for q in data['followUpQuestions'])
-    assert all(set(s['policyIds']) <= ids for s in data['plan']['steps'])
+    assert data['plan'] is None
 
 
 def test_explicit_rules_override_conflicting_llm_and_historical_intent():
@@ -108,6 +108,7 @@ def test_profile_only_correction_preserves_policy_query_context_and_results():
     second = send(c, '之前说错了，其实我是硕士', stream=True)
     assert second['userProfile']['education'] == '硕士'
     assert second['userProfile']['city'] == '苏州市'
+    # 首次只有画像补充而没有 active goal 时，修正画像不会凭空启动政策检索。
     assert second['policies']
     assert {p['policyId'] for p in first['policies']} == {p['policyId'] for p in second['policies']}
     assert '就业' in context(c)
@@ -117,7 +118,7 @@ def test_browser_implicit_consultation_survives_education_correction():
     c = client()
     send(c, '我去年本科毕业，目前待业，我在苏州')
     second = send(c, '之前说错了，其实我是硕士')
-    assert second['policies']
+    assert second['policies'] == []
     assert second['userProfile']['graduationYear'] == date.today().year - 1
 
 
@@ -175,7 +176,10 @@ def test_out_of_scope_does_not_trigger_enabled_realtime_provider():
 @pytest.mark.parametrize('message', ['补贴', '社保', '找工作'])
 def test_short_uncertain_policy_query_is_not_out_of_scope(message):
     c = client()
-    assert send(c, message)['needFollowUp'] is True
+    data = send(c, message)
+    # 没有会话上下文的短语只能作为发现/求职意图，不能凭空进入资格问卷。
+    assert data['needFollowUp'] is False
+    assert data['eligibility'] == []
 
 
 @pytest.mark.parametrize('message, expected', [
@@ -226,9 +230,11 @@ def test_current_query_keeps_active_first_and_follow_up_with_scoped_history_noti
     statuses = [repo.get_by_id(p['policyId']).validityStatus.value for p in data['policies']]
     assert 'ACTIVE' in statuses and 'HISTORICAL' in statuses
     assert statuses.index('ACTIVE') < statuses.index('HISTORICAL')
-    assert data['needFollowUp']
-    assert all(q in data['replyText'] for q in data['followUpQuestions'])
-    assert '求职创业补贴' in data['replyText'] and '历史' in data['replyText']
+    # “我现在还能申请”是在询问本人可申请性，应走范围受限的资格判断。
+    assert data['needFollowUp'] is True
+    assert len(data['followUpQuestions']) <= 2
+    # 混合结果的历史状态保留在政策卡片，不追加到当前对话正文。
+    assert '历史申报通知' not in data['replyText']
     assert '未配置实时检索服务' in data['replyText']
 
 

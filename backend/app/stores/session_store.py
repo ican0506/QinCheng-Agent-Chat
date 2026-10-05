@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from app.core.errors import InvalidRequestError
 from app.services.llm.base import LLMMessage
 from app.models.chat import UserProfile
+from app.services.policy_query_context import UserGoal
 
 
 @dataclass
@@ -16,6 +17,7 @@ class SessionRecord:
     material_declarations: dict[str, bool] = field(default_factory=dict)
     internal_profile: UserProfile = field(default_factory=UserProfile)
     policy_query_context: str | None = None
+    user_goal: UserGoal | None = None
     manual_profile_fields: set[str] = field(default_factory=set)
 
 
@@ -165,3 +167,22 @@ class InMemorySessionStore:
             elif record.user_id != user_id:
                 raise InvalidRequestError("sessionId 与 userId 不匹配")
             record.policy_query_context = query
+
+    async def get_user_goal(self, session_id: str, user_id: str) -> UserGoal | None:
+        async with self._lock:
+            record = self._sessions.get(session_id)
+            if record is None:
+                return None
+            if record.user_id != user_id:
+                raise InvalidRequestError("sessionId 与 userId 不匹配")
+            return record.user_goal
+
+    async def set_user_goal(self, session_id: str, user_id: str, goal: UserGoal | None) -> None:
+        async with self._lock:
+            record = self._sessions.get(session_id)
+            if record is None:
+                record = SessionRecord(user_id=user_id)
+                self._sessions[session_id] = record
+            elif record.user_id != user_id:
+                raise InvalidRequestError("sessionId 与 userId 不匹配")
+            record.user_goal = goal
