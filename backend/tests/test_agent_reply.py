@@ -126,8 +126,8 @@ def test_agent_grounding_violation_falls_back_to_deterministic_template() -> Non
     assert data["suggestedActions"]
 
 
-def test_agent_self_intro_with_generic_policy_terms_passes_grounding() -> None:
-    """自我介绍提到"帮你查补贴"等泛词不算无来源推荐，不应误拒。"""
+def test_agent_self_intro_is_conversational_and_bypasses_business_tools() -> None:
+    """身份询问属于普通对话，不应为生成介绍而调用模型或业务工具。"""
     provider = ScriptedToolProvider([
         ScriptedToolProvider.text(
             "我是苏州毕业生就业创业政策助手，可以帮你查询补贴政策、判断资格、梳理办理材料。"
@@ -140,7 +140,12 @@ def test_agent_self_intro_with_generic_policy_terms_passes_grounding() -> None:
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["replyText"].startswith("我是苏州毕业生就业创业政策助手")
+    assert "青程 Agent" in data["replyText"]
+    assert data["policies"] == []
+    assert data["eligibility"] == []
+    assert data["materialResults"] == []
+    assert data["plan"] is None
+    assert provider.calls == []
 
 
 def test_agent_tool_loop_limit_falls_back_to_template() -> None:

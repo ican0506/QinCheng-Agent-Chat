@@ -14,7 +14,7 @@ from app.agent.nodes.realtime_policy_search import RealtimePolicySearchNode
 from app.agent.presentation import PresentationAdapter
 from app.policy.models import ApplicationStatus, ValidityStatus
 from app.policy.repository import PolicyRepository
-from app.services.policy_query_context import GoalResolver, RouteDecider, UserGoal
+from app.services.policy_query_context import ConversationIntentDetector, GoalResolver, RouteDecider, UserGoal
 
 GraphNode = Callable[[GovernmentAgentState], Awaitable[GovernmentAgentState]]
 
@@ -45,6 +45,14 @@ class GraphNodeAdapter:
 
     async def resolve_goal(self, state: GovernmentAgentState) -> GovernmentAgentState:
         detected = state.requestedGoal or GoalResolver.resolve(state.userMessage, state.activeGoal)
+        state.conversationIntent = ConversationIntentDetector.detect(state.userMessage)
+        # 会话元表达只消费本轮消息，不能清空正在进行的真实任务，更不能把
+        # 上一轮的 active goal 当成本轮搜索目标。
+        if detected is UserGoal.CONVERSATIONAL:
+            state.userGoal = detected
+            state.routeDecision = RouteDecider.decide(detected, previous_goal=state.activeGoal)
+            state.applicationGuide = False
+            return state
         effective = (
             state.activeGoal
             if detected in {UserGoal.FOLLOW_UP_REPLY, UserGoal.PROFILE_UPDATE}

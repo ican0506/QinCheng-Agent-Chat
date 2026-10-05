@@ -33,6 +33,7 @@ class UserGoal(str, Enum):
     APPLICATION_GUIDE = "APPLICATION_GUIDE"
     PROFILE_UPDATE = "PROFILE_UPDATE"
     FOLLOW_UP_REPLY = "FOLLOW_UP_REPLY"
+    CONVERSATIONAL = "CONVERSATIONAL"
     OUT_OF_SCOPE = "OUT_OF_SCOPE"
 
 
@@ -53,6 +54,8 @@ class GoalResolver:
 
     @staticmethod
     def resolve(message: str, previous: UserGoal | None = None) -> UserGoal:
+        if ConversationIntentDetector.detect(message) is not None:
+            return UserGoal.CONVERSATIONAL
         if PolicyDomainIntentDetector.detect(message) is PolicyDomainIntent.OUT_OF_SCOPE:
             return UserGoal.OUT_OF_SCOPE
         # 明确的新目标始终先于“沿用上一轮”。
@@ -87,7 +90,13 @@ class GoalResolver:
             return UserGoal.POLICY_DISCOVERY
         if re.search(r"那下一步|下一步.*(?:干什么|怎么做)|接下来", message) and previous is not None:
             return UserGoal.FOLLOW_UP_REPLY
-        return UserGoal.POLICY_DISCOVERY
+        if ContextualFollowUpDetector.detect(message) and previous is not None:
+            return UserGoal.FOLLOW_UP_REPLY
+        # 明确就业创业政策域信号仍维持既有政策发现语义；只有完全没有业务
+        # 信号的普通表达才进入 CONVERSATIONAL。
+        if PolicyDomainIntentDetector.detect(message) is PolicyDomainIntent.IN_SCOPE:
+            return UserGoal.POLICY_DISCOVERY
+        return UserGoal.CONVERSATIONAL
 
 
 class RouteDecider:
@@ -121,6 +130,45 @@ class RouteDecider:
         if effective_goal in {UserGoal.POLICY_DISCOVERY, UserGoal.JOB_SEARCH}:
             return RouteDecision(runPolicySearch=True, generateSuggestions=True)
         return RouteDecision()
+
+
+class ConversationIntent(str, Enum):
+    GREETING = "GREETING"
+    GRATITUDE = "GRATITUDE"
+    IDENTITY = "IDENTITY"
+    CORRECTION = "CORRECTION"
+    PAUSE = "PAUSE"
+
+
+class ConversationIntentDetector:
+    """集中识别不应触发业务工具的会话元表达。"""
+
+    @staticmethod
+    def detect(message: str) -> ConversationIntent | None:
+        text = message.strip()
+        if re.fullmatch(r"(?:你)?好[呀啊！!。]?|嗨[！!。]?|哈喽[！!。]?", text):
+            return ConversationIntent.GREETING
+        if re.fullmatch(r"(?:谢谢|感谢|多谢|辛苦了)[！!。]?", text):
+            return ConversationIntent.GRATITUDE
+        if re.search(r"你(?:是|是谁|能做什么)|介绍一下你自己", text):
+            return ConversationIntent.IDENTITY
+        if re.search(r"我(?:都)?没(?:有)?(?:给你)?说|你怎么知道|你理解错了|不是这个意思|别(?:乱|自行)?推断", text):
+            return ConversationIntent.CORRECTION
+        if re.search(r"先别(?:查|搜|管).*(?:政策|补贴|资格)|先不用(?:查|搜|判断)", text):
+            return ConversationIntent.PAUSE
+        return None
+
+
+class ContextualFollowUpDetector:
+    """短追问必须依赖 active goal，不能只根据当前短文本猜测新任务。"""
+
+    @staticmethod
+    def detect(message: str) -> bool:
+        return bool(re.fullmatch(
+            r"\s*(?:那)?(?:这个呢|我可以吗|还能(?:申请|申领)吗|继续(?:申请|办理)?|"
+            r"还有什么适合我的|需要什么条件|怎么办理)\s*[？?。！!]*\s*",
+            message,
+        ))
 
 
 class UserGoalDetector:
@@ -208,6 +256,10 @@ class PolicyDomainIntentDetector:
 class PolicyQueryContextResolver:
     @staticmethod
     def resolve(message: str, previous: str | None) -> tuple[str | None, str]:
+        if ConversationIntentDetector.detect(message) is not None:
+            # 闲聊与质疑不能把上一轮检索词重新送进本轮工具调用；旧任务本身
+            # 由 active goal 保留，等待用户明确补充或继续。
+            return previous, message
         reset = bool(re.search(r"换个问题|重新开始", message))
         if reset:
             previous = None

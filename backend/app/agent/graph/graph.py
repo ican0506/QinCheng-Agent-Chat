@@ -95,7 +95,11 @@ class GovernmentAgentGraph:
 
     @staticmethod
     def _after_goal_resolution(data: GovernmentAgentGraphState) -> str:
-        return "presentation" if data["agent"].userGoal is UserGoal.OUT_OF_SCOPE else "merge_profile"
+        return (
+            "presentation"
+            if data["agent"].userGoal in {UserGoal.OUT_OF_SCOPE, UserGoal.CONVERSATIONAL}
+            else "merge_profile"
+        )
 
     @staticmethod
     def _route_goal(data: GovernmentAgentGraphState) -> str:

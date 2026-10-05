@@ -335,6 +335,7 @@ class ChatService:
         previous_query = await self._store.get_policy_query_context(request.sessionId, request.userId)
         query_context, search_query = PolicyQueryContextResolver.resolve(request.message, previous_query)
         previous_goal = await self._store.get_user_goal(request.sessionId, request.userId)
+        previous_policy = await self._store.get_active_policy(request.sessionId, request.userId)
         await self._store.set_policy_query_context(request.sessionId, request.userId, query_context)
         # 域外消息不需要画像抽取；具体目标解析与最终路由仍只由图中的
         # GoalResolver/conditional edge 完成。
@@ -347,6 +348,7 @@ class ChatService:
                 policy_search_query=search_query,
                 metrics=metrics,
                 active_goal=previous_goal,
+                active_policy=previous_policy,
             )
             await self._store.set_internal_profile(request.sessionId, request.userId, state.userProfile)
             return state
@@ -414,12 +416,14 @@ class ChatService:
             policy_search_query=search_query,
             metrics=metrics,
             active_goal=previous_goal,
+            active_policy=previous_policy,
         )
         await self._store.set_user_goal(
             request.sessionId,
             request.userId,
             None if state.userGoal is UserGoal.OUT_OF_SCOPE else state.activeGoal,
         )
+        await self._store.set_active_policy(request.sessionId, request.userId, state.activePolicy)
         await self._store.set_material_declarations(request.sessionId, request.userId, state.materialDeclarations)
         await self._store.set_internal_profile(request.sessionId, request.userId, state.userProfile)
         return state
@@ -433,6 +437,7 @@ class ChatService:
         policy_search_query: str | None,
         metrics: RequestTimings | None = None,
         active_goal: UserGoal | None = None,
+        active_policy: str | None = None,
         requested_goal: UserGoal | None = None,
     ) -> GovernmentAgentState:
         workflow_started_at = perf_counter()
@@ -446,6 +451,7 @@ class ChatService:
             timings=workflow_timings,
             user_goal=requested_goal,
             active_goal=active_goal,
+            active_policy=active_policy,
         )
         if metrics is not None:
             metrics.workflow_ms = (perf_counter() - workflow_started_at) * 1000

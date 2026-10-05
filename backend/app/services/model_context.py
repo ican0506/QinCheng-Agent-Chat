@@ -22,6 +22,7 @@ QINGCHENG_SYSTEM_PROMPT = """你是青程 Agent，服务高校毕业生就业创
 
 
 class ResponseMode(str, Enum):
+    CONVERSATIONAL = "CONVERSATIONAL"
     DIRECT_ANSWER = "DIRECT_ANSWER"
     RECOMMENDATION = "RECOMMENDATION"
     ELIGIBILITY_EXPLANATION = "ELIGIBILITY_EXPLANATION"
@@ -69,6 +70,7 @@ class ModelContext(BaseModel):
 
     def _response_mode_label(self) -> str:
         return {
+            ResponseMode.CONVERSATIONAL: "普通对话或当前对话说明",
             ResponseMode.DIRECT_ANSWER: "直接回答政策事实",
             ResponseMode.RECOMMENDATION: "推荐相关支持方向",
             ResponseMode.ELIGIBILITY_EXPLANATION: "解释后端已完成的资格判断",
@@ -98,23 +100,25 @@ class ModelContextBuilder:
 
     def build(self, state: GovernmentAgentState, history: list[AgentMessage]) -> ModelContext:
         mode = self._response_mode(state)
+        conversational = mode is ResponseMode.CONVERSATIONAL
         include_eligibility = mode is ResponseMode.ELIGIBILITY_EXPLANATION
         include_application = mode is ResponseMode.APPLICATION_GUIDE
         return ModelContext(
             currentUserMessage=state.userMessage.strip(),
             conversationHistory=self._history(history),
-            userProfile=self._profile(state),
+            # 元对话不能让旧候选、证据或画像诱导模型继续上一轮任务。
+            userProfile={} if conversational else self._profile(state),
             userGoal=self._goal_label(state.userGoal),
-            activeGoal=self._goal_label(state.activeGoal) if state.activeGoal else None,
-            activePolicy=next((policy.name for policy in state.candidatePolicies if policy.policyId == state.activePolicy), None),
+            activeGoal=None if conversational else self._goal_label(state.activeGoal) if state.activeGoal else None,
+            activePolicy=None if conversational else next((policy.name for policy in state.candidatePolicies if policy.policyId == state.activePolicy), None),
             responseMode=mode,
-            policyCandidates=self._policies(state, include_application=include_application),
-            officialEvidence=self._evidence(state),
+            policyCandidates=[] if conversational else self._policies(state, include_application=include_application),
+            officialEvidence=[] if conversational else self._evidence(state),
             eligibilityResult=self._eligibility(state) if include_eligibility else [],
             materialResults=self._materials(state) if include_application or include_eligibility else [],
             plan=self._plan(state) if include_application or include_eligibility else None,
-            missingRequiredFields=list(state.followUpQuestions),
-            suggestedActions=[action.label for action in state.suggestedActions],
+            missingRequiredFields=[] if conversational else list(state.followUpQuestions),
+            suggestedActions=[] if conversational else [action.label for action in state.suggestedActions],
         )
 
     def final_messages(self, state: GovernmentAgentState, history: list[AgentMessage]) -> tuple[ModelContext, list[LLMMessage]]:
@@ -197,6 +201,8 @@ class ModelContextBuilder:
 
     @staticmethod
     def _response_mode(state: GovernmentAgentState) -> ResponseMode:
+        if state.userGoal is UserGoal.CONVERSATIONAL:
+            return ResponseMode.CONVERSATIONAL
         if state.needFollowUp:
             return ResponseMode.FOLLOW_UP
         if state.userGoal is UserGoal.ELIGIBILITY_CHECK:
@@ -214,6 +220,7 @@ class ModelContextBuilder:
             UserGoal.JOB_SEARCH: "就业方向咨询", UserGoal.ELIGIBILITY_CHECK: "资格判断",
             UserGoal.APPLICATION_GUIDE: "办理指引", UserGoal.PROFILE_UPDATE: "更新个人情况",
             UserGoal.FOLLOW_UP_REPLY: "补充当前任务所需信息", UserGoal.OUT_OF_SCOPE: "服务范围说明",
+            UserGoal.CONVERSATIONAL: "普通对话",
             None: "未明确",
         }[goal]
 
