@@ -235,7 +235,7 @@ def test_current_query_keeps_active_first_and_follow_up_with_scoped_history_noti
     assert len(data['followUpQuestions']) <= 2
     # 混合结果的历史状态保留在政策卡片，不追加到当前对话正文。
     assert '历史申报通知' not in data['replyText']
-    assert '未配置实时检索服务' in data['replyText']
+    assert '实时官方信息暂时不可用' in data['replyText']
 
 
 def test_explicit_historical_query_still_returns_history_and_correct_window_notice():

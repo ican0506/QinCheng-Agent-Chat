@@ -13,17 +13,19 @@ class RealtimePolicySearchNode:
         self.tool = tool
         self.enabled = enabled
 
-    async def execute(self, state: GovernmentAgentState) -> GovernmentAgentState:
+    async def execute(self, state: GovernmentAgentState, *, force: bool = False) -> GovernmentAgentState:
         started = perf_counter()
         intent = FreshnessIntentDetector.detect(state.userMessage)
         state.realtimePolicyHits = []
         state.realtimeSearchStatus = RealtimeSearchStatus.NOT_TRIGGERED
-        if intent.requiresRealtimeSearch:
+        should_search = force or intent.requiresRealtimeSearch
+        if should_search:
             state.realtimeSearchStatus = RealtimeSearchStatus.DISABLED
             if self.enabled:
                 try:
-                    state.realtimeSearchStatus, state.realtimePolicyHits = await self.tool.search(state.userProfile, state.userMessage, intent.reason or '')
+                    state.realtimeSearchStatus, state.realtimePolicyHits = await self.tool.search(state.userProfile, state.userMessage, intent.reason or '官方政策信息查询')
                 except Exception:
                     state.realtimeSearchStatus = RealtimeSearchStatus.ERROR
-        logger.info('realtime_policy_search triggered=%s provider=%s status=%s result_count=%d realtime_search_ms=%d', intent.requiresRealtimeSearch, type(self.tool.provider).__name__, state.realtimeSearchStatus.value, len(state.realtimePolicyHits), (perf_counter()-started)*1000)
+        state.realtimeSearchMs = (perf_counter() - started) * 1000
+        logger.info('realtime_policy_search triggered=%s provider=%s status=%s result_count=%d realtime_search_ms=%d', should_search, type(self.tool.provider).__name__, state.realtimeSearchStatus.value, len(state.realtimePolicyHits), state.realtimeSearchMs)
         return state

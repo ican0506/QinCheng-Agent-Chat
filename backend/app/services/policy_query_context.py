@@ -112,7 +112,12 @@ class RouteDecider:
                 generateSuggestions=True,
             )
         if effective_goal is UserGoal.APPLICATION_GUIDE:
-            return RouteDecision(runPolicySearch=True, generateSuggestions=True)
+            return RouteDecision(
+                runPolicySearch=True,
+                runMaterialCheck=True,
+                runPlan=True,
+                generateSuggestions=True,
+            )
         if effective_goal in {UserGoal.POLICY_DISCOVERY, UserGoal.JOB_SEARCH}:
             return RouteDecision(runPolicySearch=True, generateSuggestions=True)
         return RouteDecision()

@@ -84,8 +84,8 @@ def test_application_guide_returns_process_without_full_profile_gate() -> None:
 
     assert data["policies"]
     assert data["needFollowUp"] is False
-    assert data["materialResults"] == []
-    assert data["plan"] is None
+    assert data["materialResults"]
+    assert data["plan"] is not None
     assert data["applicationGuide"] is True
     assert "办理流程" in data["replyText"]
 
@@ -97,8 +97,8 @@ def test_goal_resolver_and_route_decider_keep_routing_explicit() -> None:
     assert goal is UserGoal.APPLICATION_GUIDE
     assert route.runPolicySearch is True
     assert route.runEligibility is False
-    assert route.runMaterialCheck is False
-    assert route.runPlan is False
+    assert route.runMaterialCheck is True
+    assert route.runPlan is True
     assert route.generateSuggestions is True
 
 
