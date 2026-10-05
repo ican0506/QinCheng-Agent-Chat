@@ -107,7 +107,7 @@ def test_agent_tool_call_produces_grounded_reply_and_feeds_tool_result_back() ->
     assert tool_messages and "创业社会保险补贴" in tool_messages[0]["content"]
     assert set(data) == {
         "sessionId", "replyText", "needFollowUp", "followUpQuestions", "userProfile",
-        "policies", "eligibility", "plan", "materialResults", "sources",
+        "policies", "eligibility", "plan", "materialResults", "sources", "suggestedActions", "applicationGuide",
     }
 
 
@@ -121,9 +121,9 @@ def test_agent_grounding_violation_falls_back_to_deterministic_template() -> Non
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["needFollowUp"] is True
+    assert data["needFollowUp"] is False
     assert "每月能领2000元" not in data["replyText"]
-    assert "补充" in data["replyText"]
+    assert data["suggestedActions"]
 
 
 def test_agent_self_intro_with_generic_policy_terms_passes_grounding() -> None:

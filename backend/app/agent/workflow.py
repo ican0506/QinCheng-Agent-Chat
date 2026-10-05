@@ -6,6 +6,9 @@ from app.services.policy_query_context import (
     PolicyDomainIntentDetector,
     PolicyQueryMode,
     PolicyQueryModeDetector,
+    GoalResolver,
+    RouteDecider,
+    UserGoal,
 )
 from app.agent.nodes.eligibility import EligibilityNode
 from app.agent.nodes.plan import PlanNode
@@ -50,7 +53,7 @@ class WorkflowAgent:
     ) -> WorkflowAgent:
         return cls(
             ProfileNode(),
-            PolicySearchNode(policy_search_tool),
+            PolicySearchNode(policy_search_tool, repository),
             EligibilityNode(RuleEligibilityTool(repository)),
             PolicyCompareNode(policy_compare_tool),
             PlanNode(plan_tool),
@@ -58,7 +61,7 @@ class WorkflowAgent:
             realtime_node,
         )
 
-    async def run(self, session_id: str, message: str, user_profile: UserProfile, material_declarations: dict[str, bool] | None = None, policy_search_query: str | None = None, timings: dict[str, float] | None = None) -> GovernmentAgentState:
+    async def run(self, session_id: str, message: str, user_profile: UserProfile, material_declarations: dict[str, bool] | None = None, policy_search_query: str | None = None, timings: dict[str, float] | None = None, user_goal: UserGoal | None = None) -> GovernmentAgentState:
         state = GovernmentAgentState(
             sessionId=session_id,
             userMessage=message,
@@ -67,13 +70,19 @@ class WorkflowAgent:
             policySearchQuery=policy_search_query,
             domainIntent=PolicyDomainIntentDetector.detect(message),
             queryMode=PolicyQueryModeDetector.detect(message),
+            userGoal=user_goal or GoalResolver.resolve(message),
         )
+        state.routeDecision = RouteDecider.decide(state.userGoal)
         if state.domainIntent is PolicyDomainIntent.OUT_OF_SCOPE:
             state.stage = AgentStage.COMPLETED
             return state
         state = await self._profile_node.execute(state)
         if state.needFollowUp:
             return state
+        if not state.routeDecision.runPolicySearch:
+            state.stage = AgentStage.COMPLETED
+            return state
+
         nodes = [self._policy_search_node]
         if self._realtime_node is not None:
             nodes.append(self._realtime_node)
@@ -83,22 +92,26 @@ class WorkflowAgent:
             if timings is not None and node is self._realtime_node:
                 timings["realtime_search_ms"] = (perf_counter() - node_started_at) * 1000
 
-        # 政策事实查询只返回政策与来源，不在画像不足时制造个性化资格结论。
-        base_profile_complete = all(
-            getattr(state.userProfile, field) not in (None, "")
-            for field in ("city", "education", "graduationYear", "employmentStatus")
-        )
-        if state.queryMode is PolicyQueryMode.FACT_QUERY and not base_profile_complete:
+        if not state.routeDecision.runEligibility:
+            if state.userGoal is UserGoal.APPLICATION_GUIDE:
+                state.applicationGuide = True
             state.stage = AgentStage.COMPLETED
             return state
 
-        nodes = [self._eligibility_node, self._policy_compare_node]
-        if self._material_check_node is not None:
-            nodes.append(self._material_check_node)
-        nodes.append(self._plan_node)
+        nodes = [self._eligibility_node]
         for node in nodes:
             node_started_at = perf_counter()
             state = await node.execute(state)
             if timings is not None and node is self._realtime_node:
                 timings["realtime_search_ms"] = (perf_counter() - node_started_at) * 1000
+        if state.routeDecision.runMaterialCheck and any(result.overallStatus.value == "PASS" for result in state.eligibilityResults):
+            nodes = [self._policy_compare_node]
+            if self._material_check_node is not None:
+                nodes.append(self._material_check_node)
+            if state.routeDecision.runPlan:
+                nodes.append(self._plan_node)
+            for node in nodes:
+                state = await node.execute(state)
+        else:
+            state.stage = AgentStage.COMPLETED
         return state

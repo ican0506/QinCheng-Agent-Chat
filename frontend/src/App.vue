@@ -65,6 +65,11 @@ function handleFollowUp(question: string): void {
   chatPanel.value?.focusComposer(question);
 }
 
+function handleSuggestedAction(prompt: string): void {
+  mobileView.value = "chat";
+  void send(prompt);
+}
+
 function handleMaterialDeclaration(materialId: string, prepared: boolean): void {
   const material = latestChatData.value?.materialResults.find((item) => item.materialId === materialId);
   if (!material) return;
@@ -143,6 +148,7 @@ async function handleDeleteSession(sessionId: string): Promise<void> {
           @follow-up="handleFollowUp"
           @material-declare="handleMaterialDeclaration"
           @profile-save="handleProfileSave"
+          @suggested-action="handleSuggestedAction"
         />
       </div>
 

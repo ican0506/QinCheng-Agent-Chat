@@ -203,7 +203,12 @@ def test_failure_and_empty_keep_entire_local_workflow(provider, status, notice):
     app = create_app(cfg, FailingProvider(), realtime_provider=provider)
     data = TestClient(app).post('/api/agent/chat', json=request).json()['data']
     assert notice in data['replyText']
-    assert data['policies'] and data['eligibility'] and data['materialResults'] and data['plan']
+    # “当前还能申请吗”是政策时效咨询；实时失败不能影响本地召回，
+    # 也不能隐式启动资格、材料和办理计划链路。
+    assert data['policies']
+    assert data['eligibility'] == []
+    assert data['materialResults'] == []
+    assert data['plan'] is None
 
 def test_associated_evidence_keeps_repository_rules_and_materials():
     from dataclasses import replace
@@ -211,7 +216,7 @@ def test_associated_evidence_keeps_repository_rules_and_materials():
     record = repo.get_by_id('suzhou-startup-social-2021')
     before = record.model_dump()
     provider = FakeRealtimeSearchProvider([SearchResult(title=record.name, url=record.sourceUrl, snippet='新网页声称所有人都符合')])
-    request = payload('创业社会保险补贴现在还能申请吗？', {'graduationDate':'2025-06-20', 'socialInsuranceMonths':1, 'businessRegistrationMonths':12})
+    request = payload('我符合创业社会保险补贴吗？', {'graduationDate':'2025-06-20', 'socialInsuranceMonths':1, 'businessRegistrationMonths':12})
     app = create_app(replace(settings(), realtime_policy_search_enabled=True), MisleadingProvider(), realtime_provider=provider)
     data = TestClient(app).post('/api/agent/chat', json=request).json()['data']
     result = next(r for r in data['eligibility'] if r['policyId'] == record.policyId)

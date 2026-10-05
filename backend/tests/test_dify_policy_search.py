@@ -445,7 +445,7 @@ def test_application_uses_dify_tool_without_changing_chat_or_sse_contract() -> N
     data = response.json()["data"]
     assert set(data) == {
         "sessionId", "replyText", "needFollowUp", "followUpQuestions", "userProfile",
-        "policies", "eligibility", "plan", "materialResults", "sources",
+        "policies", "eligibility", "plan", "materialResults", "sources", "suggestedActions", "applicationGuide",
     }
     assert isinstance(app.state.policy_search_tool, DifyPolicySearchTool)
 

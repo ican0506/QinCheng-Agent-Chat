@@ -16,6 +16,7 @@ const result: ChatData = {
   policies: [{ policyId: "policy-a", name: "创业补贴", region: "苏州市", department: "人社部门", summary: "政策摘要", effectiveDate: "2026-01-01", expiryDate: null, sourceUrl: "https://example.gov.cn/policy", matchReason: "创业", conditions: [], requiredMaterials: [], process: [], isMock: false }],
   eligibility: [{ policyId: "policy-a", overallStatus: "UNKNOWN", conditionResults: [], missingFields: ["graduationDate"], summary: "缺少信息" }],
   plan: { summary: "办理计划", steps: [{ stepId: "step-a", title: "补充信息", description: "补充毕业日期", policyIds: ["policy-a"], requiredMaterials: [], actionType: "PROVIDE_INFO", priority: 10, status: "BLOCKED" }], notes: [], isMock: false }, materialResults: [],
+  suggestedActions: [{ label: "看看就业见习", prompt: "就业见习适合哪些毕业生？" }],
 };
 
 const sessionA: ChatSession = { sessionId: "session-a", title: "A", messages: [] };
@@ -31,6 +32,7 @@ assert(profileDisplayItems(result.userProfile).length === 3, "画像仅展示真
 assert(safeSourceUrl(result.policies[0].sourceUrl) !== null, "官方来源链接应可追溯");
 assert(safeSourceUrl("javascript:alert(1)") === null, "非 HTTP 来源链接必须隐藏");
 assert(result.plan?.steps[0]?.status === "BLOCKED", "计划步骤必须保留后端原有顺序和状态");
+assert(result.suggestedActions?.[0]?.prompt === "就业见习适合哪些毕业生？", "建议操作必须使用后端给出的提示词");
 assert({ ...result, policies: [], eligibility: [], plan: null }.plan === null, "空数据不得回退为模拟数据");
 const material = { materialId: "policy-a:material", policyId: "policy-a", materialName: "营业执照", description: null, status: "UNKNOWN" as const, reason: "待确认", source: "POLICY" as const, userProvided: false, needsManualReview: false };
 assert(materialStatusLabels.READY === "已准备" && materialStatusLabels.MANUAL_REVIEW === "需人工核验", "材料状态应使用固定中文映射");
@@ -79,6 +81,8 @@ assert(formatWorkspaceText("缺少字段：flexibleEmploymentInsurance") === "�
 assert(formatWorkspaceText("缺少字段：futureInternalField") === "缺少字段：需补充相关信息", "未知缺失字段不泄露");
 const evidence = formatWorkspaceText("RAG 命中「申请条件」原文片段（相关度 0.18）：政策 ID：suzhou-test-2026 政策有效性：ACTIVE 真实申请条件。");
 assert(!/RAG|0\.18|suzhou-test|ACTIVE/.test(evidence) && evidence.includes("申请条件") && evidence.includes("真实申请条件"), "隐藏算法、分数和ID，保留原文依据");
+const difyEvidence = formatWorkspaceText("Dify 知识库命中原文片段：创业社会保险补贴");
+assert(!/Dify|知识库/.test(difyEvidence) && difyEvidence.includes("匹配到政策原文"), "匹配依据不得泄露知识库实现");
 const storage = { value: null as string | null, getItem: (_key: string) => storage.value, setItem: (_key: string, value: string) => { storage.value = value; } };
 persistActiveSessionId(storage, "session-a");
 assert(readActiveSessionId(storage, [sessionB, sessionA]) === "session-a", "重建后恢复选中的A而非列表首项B");

@@ -16,7 +16,7 @@ from app.realtime_policy.models import SearchResult
 from app.realtime_policy.provider import FakeRealtimeSearchProvider
 from app.realtime_policy.tool import OfficialRealtimePolicySearchTool
 from app.services.chat_service import ChatService
-from app.services.policy_query_context import PolicyDomainIntent, PolicyQueryMode, PolicyQueryModeDetector
+from app.services.policy_query_context import PolicyDomainIntent, PolicyQueryMode, PolicyQueryModeDetector, UserGoal
 from app.services.profile_update_parser import ProfileUpdateParser
 from test_real_workflow_tools import settings
 from test_release_regression import FailingProvider
@@ -154,9 +154,10 @@ def test_fact_query_keeps_historical_closed_notice_with_mixed_candidates() -> No
         userProfile=UserProfile(),
         domainIntent=PolicyDomainIntent.IN_SCOPE,
         queryMode=PolicyQueryMode.FACT_QUERY,
+        userGoal=UserGoal.POLICY_FACT,
         candidatePolicies=[historical, current],
         policyReferenceNotices={
-            historical.policyId: "当前知识库中的该记录为历史申报通知，申报窗口已结束。"
+            historical.policyId: "该记录为历史申报通知，申报窗口已结束。"
         },
     )
 
@@ -196,8 +197,9 @@ def test_personalized_policy_query_still_requires_base_profile() -> None:
     data = _send(client, "我符合创业社会保险补贴吗？")
 
     assert data["needFollowUp"] is True
-    assert data["policies"] == []
-    assert any("学历" in question for question in data["followUpQuestions"])
+    assert data["policies"]
+    assert 1 <= len(data["followUpQuestions"]) <= 2
+    assert not any("学历" in question for question in data["followUpQuestions"])
 
 
 def test_complete_startup_profile_excludes_pure_flexible_employment_policy() -> None:

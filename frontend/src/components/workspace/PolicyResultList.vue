@@ -5,7 +5,7 @@ import type { ChatData, PolicyCandidate } from "../../types/chat";
 import { eligibilityStatusLabels as statusLabels } from "../../workspace/statuses";
 import { formatWorkspaceText } from "../../workspace/display";
 
-defineProps<{ policies: PolicyCandidate[]; data: ChatData }>();
+defineProps<{ policies: PolicyCandidate[]; data: ChatData; showApplicationGuide?: boolean }>();
 </script>
 
 <template>
@@ -25,6 +25,11 @@ defineProps<{ policies: PolicyCandidate[]; data: ChatData }>();
         <div><dt>生效时间</dt><dd>{{ policy.effectiveDate || "--" }}</dd></div>
         <div><dt>官方来源</dt><dd><a v-if="safeSourceUrl(policy.sourceUrl)" :href="safeSourceUrl(policy.sourceUrl) ?? undefined" target="_blank" rel="noopener noreferrer">查看来源<ExternalLink :size="10" /></a><template v-else>暂无链接</template></dd></div>
       </dl>
+      <div v-if="showApplicationGuide && (policy.requiredMaterials.length || policy.process.length)" class="eligibility-detail">
+        <strong>办理参考</strong>
+        <p v-if="policy.requiredMaterials.length">参考材料：{{ policy.requiredMaterials.join("；") }}</p>
+        <p v-if="policy.process.length">办理流程：{{ policy.process.join("；") }}</p>
+      </div>
       <div v-if="getEligibilityByPolicyId(data, policy.policyId)" class="eligibility-detail">
         <strong>资格辅助判断：{{ statusLabels[getEligibilityByPolicyId(data, policy.policyId)!.overallStatus] }}</strong>
         <p>{{ formatWorkspaceText(getEligibilityByPolicyId(data, policy.policyId)!.summary) }}</p>

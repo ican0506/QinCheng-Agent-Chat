@@ -46,6 +46,13 @@ export interface ChatData {
   plan: OverallPlan | null;
   materialResults: MaterialResult[];
   sources?: WebSource[];
+  suggestedActions?: SuggestedAction[];
+  applicationGuide?: boolean;
+}
+
+export interface SuggestedAction {
+  label: string;
+  prompt: string;
 }
 
 export type EligibilityStatus = "PASS" | "FAIL" | "UNKNOWN" | "MANUAL_REVIEW";

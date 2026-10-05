@@ -179,7 +179,7 @@ def test_manual_employment_update_recomputes_eligibility_with_new_status() -> No
         json={
             "sessionId": session_id,
             "userId": user_id,
-            "message": "我在苏州，本科，2026年毕业，待就业，想了解灵活就业社保补贴",
+            "message": "我在苏州，本科，2026年毕业，待就业，我符合灵活就业社保补贴吗？",
             "userProfile": {},
         },
     )

@@ -9,7 +9,7 @@ from time import perf_counter
 from typing import Literal
 import asyncio
 
-from app.agent.models import GovernmentAgentState
+from app.agent.models import GovernmentAgentState, SuggestedAction
 from app.realtime_policy.models import RealtimeSearchStatus
 from app.agent.workflow import WorkflowAgent
 from app.models.chat import ChatData, ChatRequest, UserProfile, WebSource
@@ -23,6 +23,8 @@ from app.services.policy_query_context import (
     PolicyDomainIntentDetector,
     PolicyQueryContextResolver,
     PolicyQueryMode,
+    GoalResolver,
+    UserGoal,
 )
 from app.policy.repository import PolicyRepository
 from app.policy.models import ApplicationStatus, ValidityStatus
@@ -61,6 +63,10 @@ SYSTEM_PROMPT = """你是面向应届毕业生的就业创业政策对话助手�
 本轮会提供结构化 Agent 上下文。该上下文是政策、资格、办理顺序和追问的唯一事实来源；不得自行创造、补充或修改任何政策、金额、日期、资格条件或办理结论。
 只能解释结构化 Agent State 中已有的候选政策、资格、材料与计划；不得推荐 State 中不存在的具体政策。信息不足时，直接围绕 followUpQuestions 自然追问。
 默认使用简体中文回答，表达直接、简洁，可使用 Markdown。"""
+
+SYSTEM_PROMPT += """\n必须遵循本轮结构化状态的 routeDecision：仅在 runEligibility=true 时解释资格结果和追问信息；
+POLICY_FACT、POLICY_DISCOVERY、JOB_SEARCH 不得虚构资格、材料状态或办理计划；APPLICATION_GUIDE 仅说明已有流程、材料参考和官方来源。
+先回答当前问题，不能为了补全画像而追问无关字段。SuggestedActions 只是用户可选的下一步，不要把它们写成强制要求。"""
 
 SYSTEM_PROMPT += """\nrealtimePolicyHits 是只读官方检索证据，不是资格规则。只能引用工具实际返回的标题、URL、发布时间和摘要，所有实时事实必须附官方 URL。
 必须区分本地结构化政策与实时发现但尚未结构化的通知。relatedPolicyId=null 的通知尚未完成结构化核验，不能说用户符合，不能生成资格、材料或申请计划。
@@ -132,6 +138,7 @@ class ChatService:
             user_profile=profile,
             material_declarations=declarations,
             policy_search_query=previous_query or workflow_message,
+            user_goal=await self._store.get_user_goal(session_id, user_id),
         )
         await self._store.set_material_declarations(session_id, user_id, state.materialDeclarations)
         await self._store.set_internal_profile(session_id, user_id, state.userProfile)
@@ -179,6 +186,11 @@ class ChatService:
             plan=state.overallPlan.model_dump(mode="json") if state.overallPlan else None,
             materialResults=state.materialResults,
             sources=sources or [],
+            suggestedActions=[
+                {"label": action.label, "prompt": action.prompt}
+                for action in state.suggestedActions
+            ],
+            applicationGuide=state.applicationGuide,
         )
 
     @staticmethod
@@ -224,7 +236,7 @@ class ChatService:
         historical_or_closed_notice = ChatService._historical_or_closed_notice(state)
         if historical_or_closed_notice is not None:
             return historical_or_closed_notice
-        if state.queryMode is PolicyQueryMode.FACT_QUERY:
+        if state.userGoal is UserGoal.POLICY_FACT:
             if not state.candidatePolicies and not state.knowledgeEvidences:
                 return "暂未在本地已核验政策库中找到与该问题高度相关的政策。"
             lines = ["已找到以下政策资料："]
@@ -256,8 +268,33 @@ class ChatService:
             if state.needFollowUp and state.followUpQuestions:
                 reply += "\n还需要补充：" + "；".join(state.followUpQuestions)
             return reply
-        if state.needFollowUp and state.followUpQuestions:
-            reply = f"已完成初步政策分析，还需要补充以下信息后才能继续判断：{'；'.join(state.followUpQuestions)}"
+        if state.userGoal is UserGoal.JOB_SEARCH:
+            policy_names = "、".join(policy.name for policy in state.candidatePolicies[:2])
+            reply = (
+                f"如果你的目标是尽快找工作，当前更值得优先关注{policy_names or '就业服务和高校毕业生就业支持'}。"
+                "我会先按就业方向为你提供信息；如果你之后想判断某项补贴资格，再补充该政策真正需要的信息。"
+            )
+        elif state.userGoal is UserGoal.POLICY_DISCOVERY:
+            policy_names = "、".join(policy.name for policy in state.candidatePolicies[:3])
+            reply = (
+                f"根据你目前提供的信息，先为你整理更相关的方向：{policy_names or '高校毕业生就业创业支持'}。"
+                "如需判断某一项是否符合，我再针对该政策确认必要信息。"
+            )
+        elif state.userGoal is UserGoal.APPLICATION_GUIDE:
+            if not state.candidatePolicies:
+                reply = "暂未找到对应政策资料；请补充想办理的政策名称，我再为你整理官方流程。"
+            else:
+                policy = state.candidatePolicies[0]
+                parts = [f"《{policy.name}》通常可按以下流程了解和办理："]
+                if policy.process:
+                    parts.append("办理流程：" + "；".join(policy.process))
+                if policy.requiredMaterials:
+                    parts.append("参考材料：" + "；".join(policy.requiredMaterials))
+                parts.append("官方来源：" + policy.sourceUrl)
+                parts.append("具体材料和受理要求请以当前官方办事指南为准。")
+                reply = "\n".join(parts)
+        elif state.needFollowUp and state.followUpQuestions:
+            reply = "要判断你是否符合当前政策，还需要确认：" + "；".join(state.followUpQuestions)
         else:
             statuses = {item.overallStatus.value for item in state.eligibilityResults if item.policyId not in state.policyReferenceNotices}
             if "MANUAL_REVIEW" in statuses:
@@ -268,10 +305,9 @@ class ChatService:
                 reply = "暂未找到与当前信息高度相关的政策，可以补充地区、毕业时间或就业创业情况后继续查询。"
             else:
                 reply = "已完成政策匹配和初步资格辅助判断，请查看右侧工作台了解具体结果。"
-        for candidate in state.candidatePolicies:
-            notice = state.policyReferenceNotices.get(candidate.policyId)
-            if notice:
-                reply += f"\n\n《{candidate.name}》：{notice}"
+        # 混合召回时，历史/关闭状态由政策卡片呈现；不要把某条候选的时效说明
+        # 追加为对话的第二段，避免用户把历史通知误读成当前任务的行动建议。
+        # 全部候选都是历史/关闭记录时，函数开头的 `_historical_or_closed_notice` 已处理。
         return reply
 
     @staticmethod
@@ -326,7 +362,17 @@ class ChatService:
         stored_profile = await self._store.get_internal_profile(request.sessionId, request.userId)
         previous_query = await self._store.get_policy_query_context(request.sessionId, request.userId)
         query_context, search_query = PolicyQueryContextResolver.resolve(request.message, previous_query)
+        previous_goal = await self._store.get_user_goal(request.sessionId, request.userId)
+        detected_goal = GoalResolver.resolve(request.message, previous_goal)
+        user_goal = (
+            previous_goal
+            if detected_goal in {UserGoal.PROFILE_UPDATE, UserGoal.FOLLOW_UP_REPLY} and previous_goal is not None
+            else detected_goal
+        )
+        if user_goal is UserGoal.OUT_OF_SCOPE:
+            user_goal = None
         await self._store.set_policy_query_context(request.sessionId, request.userId, query_context)
+        await self._store.set_user_goal(request.sessionId, request.userId, user_goal)
         if PolicyDomainIntentDetector.detect(request.message) is PolicyDomainIntent.OUT_OF_SCOPE:
             workflow_started_at = perf_counter()
             state = await self._workflow_agent.run(
@@ -397,6 +443,7 @@ class ChatService:
             material_declarations=declarations,
             policy_search_query=search_query,
             metrics=metrics,
+            user_goal=user_goal,
         )
         await self._store.set_material_declarations(request.sessionId, request.userId, state.materialDeclarations)
         await self._store.set_internal_profile(request.sessionId, request.userId, state.userProfile)
@@ -410,6 +457,7 @@ class ChatService:
         material_declarations: dict[str, bool],
         policy_search_query: str | None,
         metrics: RequestTimings | None = None,
+        user_goal: UserGoal | None = None,
     ) -> GovernmentAgentState:
         workflow_started_at = perf_counter()
         workflow_timings: dict[str, float] = {}
@@ -420,7 +468,9 @@ class ChatService:
             material_declarations=material_declarations,
             policy_search_query=policy_search_query,
             timings=workflow_timings,
+            user_goal=user_goal,
         )
+        state.suggestedActions = self._suggested_actions(state)
         if metrics is not None:
             metrics.workflow_ms = (perf_counter() - workflow_started_at) * 1000
             metrics.realtime_search_ms = workflow_timings.get("realtime_search_ms", 0)
@@ -433,15 +483,39 @@ class ChatService:
                 historical = record.validityStatus in {ValidityStatus.HISTORICAL, ValidityStatus.EXPIRED}
                 closed = record.applicationStatus is ApplicationStatus.CLOSED
                 if historical and closed:
-                    notice = "当前知识库中的该记录为历史申报通知，申报窗口已结束。请关注苏州市人社部门后续发布的最新年度申报安排。"
+                    notice = "该记录为历史申报通知，申报窗口已结束。请关注苏州市人社部门后续发布的最新年度申报安排。"
                 elif historical:
-                    notice = "当前知识库中的该记录为历史政策依据，不能直接作为当前申请依据。请关注苏州市人社部门后续发布的最新年度申报安排。"
+                    notice = "该记录为历史政策依据，不能直接作为当前申请依据。请关注苏州市人社部门后续发布的最新年度申报安排。"
                 elif closed:
                     notice = "该政策当前申报窗口已结束。请关注苏州市人社部门后续发布的最新年度申报安排。"
                 else:
                     continue
                 state.policyReferenceNotices[candidate.policyId] = notice
         return state
+
+    @staticmethod
+    def _suggested_actions(state: GovernmentAgentState) -> list[SuggestedAction]:
+        if state.userGoal is UserGoal.JOB_SEARCH:
+            return [
+                SuggestedAction(label="看看就业见习", prompt="就业见习适合哪些毕业生？"),
+                SuggestedAction(label="看看毕业生就业支持", prompt="毕业生现在有什么就业支持？"),
+                SuggestedAction(label="了解可能符合的补贴", prompt="我可能符合哪些就业补贴？"),
+            ]
+        if state.userGoal is UserGoal.POLICY_DISCOVERY:
+            return [
+                SuggestedAction(label="了解就业见习", prompt="就业见习适合哪些毕业生？"),
+                SuggestedAction(label="判断我是否符合", prompt="我符合这项政策吗？"),
+            ]
+        if state.userGoal is UserGoal.POLICY_FACT:
+            return [
+                SuggestedAction(label="看看办理流程", prompt="这个政策怎么办理？"),
+                SuggestedAction(label="判断我是否符合", prompt="我符合这项政策吗？"),
+            ]
+        if state.userGoal is UserGoal.ELIGIBILITY_CHECK:
+            return [SuggestedAction(label="在右侧完善画像", prompt="我想补充个人情况")]
+        if state.userGoal is UserGoal.APPLICATION_GUIDE:
+            return [SuggestedAction(label="判断我是否符合", prompt="我符合这项政策吗？")]
+        return []
 
     @staticmethod
     def _log_request_timing(

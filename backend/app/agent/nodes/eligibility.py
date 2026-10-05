@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.agent.models import AgentStage, GovernmentAgentState
 from app.agent.tools.base import EligibilityTool
+from app.services.policy_query_context import UserGoal
 
 
 class EligibilityNode:
@@ -20,6 +21,9 @@ class EligibilityNode:
         self._tool = tool
 
     async def execute(self, state: GovernmentAgentState) -> GovernmentAgentState:
+        if not state.routeDecision.runEligibility:
+            state.stage = AgentStage.COMPLETED
+            return state
         state.eligibilityResults = await self._tool.check(state.userProfile, state.candidatePolicies)
         missing_fields = list(dict.fromkeys(
             field
@@ -28,11 +32,12 @@ class EligibilityNode:
             for field in result.missingFields
         ))
         if missing_fields:
+            state.requiredFieldsForCurrentGoal = missing_fields[:2]
             state.needFollowUp = True
             state.followUpQuestions = [
                 self._questions.get(field, f"请补充 {field} 信息。")
                 for field in missing_fields[:2]
             ]
-            state.nextAction = "补充关键画像信息后重新核验资格。"
+            state.nextAction = "补充这些信息后即可继续核验当前政策资格。"
         state.stage = AgentStage.POLICY_COMPARING
         return state

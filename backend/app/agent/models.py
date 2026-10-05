@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.models.chat import MaterialCheckResult, UserProfile
 from app.realtime_policy.models import RealtimePolicyHit, RealtimeSearchStatus
-from app.services.policy_query_context import PolicyDomainIntent, PolicyQueryMode
+from app.services.policy_query_context import PolicyDomainIntent, PolicyQueryMode, RouteDecision, UserGoal
 
 
 class AgentStage(str, Enum):
@@ -76,6 +76,13 @@ class KnowledgeEvidence(BaseModel):
     score: float
 
 
+class SuggestedAction(BaseModel):
+    """前端可直接展示的下一步，不暴露内部调度目标。"""
+
+    label: str
+    prompt: str
+
+
 class ConditionResult(BaseModel):
     conditionId: str
     description: str
@@ -126,6 +133,8 @@ class GovernmentAgentState(BaseModel):
     policySearchQuery: str | None = None
     domainIntent: PolicyDomainIntent = PolicyDomainIntent.UNCERTAIN
     queryMode: PolicyQueryMode = PolicyQueryMode.UNCERTAIN
+    userGoal: UserGoal = UserGoal.POLICY_DISCOVERY
+    routeDecision: RouteDecision = Field(default_factory=RouteDecision)
     policyReferenceNotices: dict[str, str] = Field(default_factory=dict)
     stage: AgentStage = AgentStage.PROFILE_COLLECTING
     candidatePolicies: list[PolicyCandidate] = Field(default_factory=list)
@@ -138,6 +147,9 @@ class GovernmentAgentState(BaseModel):
     needFollowUp: bool = False
     followUpQuestions: list[str] = Field(default_factory=list)
     nextAction: str | None = None
+    requiredFieldsForCurrentGoal: list[str] = Field(default_factory=list)
+    suggestedActions: list[SuggestedAction] = Field(default_factory=list)
+    applicationGuide: bool = False
     errors: list[str] = Field(default_factory=list)
     realtimePolicyHits: list[RealtimePolicyHit] = Field(default_factory=list)
     realtimeSearchStatus: RealtimeSearchStatus = RealtimeSearchStatus.NOT_TRIGGERED
