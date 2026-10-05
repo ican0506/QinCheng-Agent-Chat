@@ -195,7 +195,7 @@ def test_api_sse_evidence_and_eligibility_isolation(llm):
     assert set(events[-1][1]['data']) == set(data)
     assert '尚未完成结构化核验' in events[-1][1]['data']['replyText']
 
-@pytest.mark.parametrize('provider,status,notice', [(FakeRealtimeSearchProvider([]), RealtimeSearchStatus.NO_RESULTS, '已完成实时查询'), (FakeRealtimeSearchProvider([], error=RuntimeError()), RealtimeSearchStatus.ERROR, '暂时无法检索'), (FakeRealtimeSearchProvider([], delay=0.02), RealtimeSearchStatus.TIMEOUT, '暂时无法检索')])
+@pytest.mark.parametrize('provider,status,notice', [(FakeRealtimeSearchProvider([]), RealtimeSearchStatus.NO_RESULTS, '已完成官方信息查询'), (FakeRealtimeSearchProvider([], error=RuntimeError()), RealtimeSearchStatus.ERROR, '暂时无法检索'), (FakeRealtimeSearchProvider([], delay=0.02), RealtimeSearchStatus.TIMEOUT, '暂时无法检索')])
 def test_failure_and_empty_keep_entire_local_workflow(provider, status, notice):
     from dataclasses import replace
     request = payload('创业社会保险补贴现在还能申请吗？', {'graduationDate':'2025-06-20', 'socialInsuranceMonths':12, 'businessRegistrationMonths':12})
@@ -231,5 +231,5 @@ def test_status_reply_and_prompt_have_explicit_boundaries():
         state = GovernmentAgentState(sessionId='status', userMessage='最新政策', userProfile=UserProfile(), realtimeSearchStatus=status)
         notices[status] = ChatService._fallback_reply(state)
     assert len(set(notices.values())) == 3
-    assert '未配置实时检索服务' in notices[RealtimeSearchStatus.DISABLED]
+    assert '实时官方信息暂时不可用' in notices[RealtimeSearchStatus.DISABLED]
     assert '不能说用户符合' in SYSTEM_PROMPT

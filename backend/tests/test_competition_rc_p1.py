@@ -83,13 +83,14 @@ def test_policy_information_questions_are_fact_queries_without_profile_gate(
     assert PolicyQueryModeDetector.detect(message) is PolicyQueryMode.FACT_QUERY
 
 
-def test_new_session_fact_query_searches_local_policy_without_base_profile_follow_up() -> None:
+def test_new_session_fact_query_uses_official_search_before_structured_policy_lookup() -> None:
     provider = FakeRealtimeSearchProvider([])
     client = _client(provider)
 
     data = _send(client, "创业社会保险补贴需要什么条件？")
 
-    assert provider.call_count == 0
+    # Web-first：事实咨询先尝试官方来源，再使用结构化政策资料完成稳定映射。
+    assert provider.call_count == 1
     assert data["needFollowUp"] is False
     assert data["followUpQuestions"] == []
     assert any(

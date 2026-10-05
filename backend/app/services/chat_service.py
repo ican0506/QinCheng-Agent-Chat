@@ -9,7 +9,8 @@ from time import perf_counter
 from typing import Literal
 import asyncio
 
-from app.agent.models import GovernmentAgentState, SuggestedAction
+from app.agent.models import GovernmentAgentState
+from app.agent.presentation import PresentationAdapter
 from app.realtime_policy.models import RealtimeSearchStatus
 from app.agent.workflow import WorkflowAgent
 from app.models.chat import ChatData, ChatRequest, UserProfile, WebSource
@@ -22,12 +23,9 @@ from app.services.policy_query_context import (
     PolicyDomainIntent,
     PolicyDomainIntentDetector,
     PolicyQueryContextResolver,
-    PolicyQueryMode,
-    GoalResolver,
     UserGoal,
 )
 from app.policy.repository import PolicyRepository
-from app.policy.models import ApplicationStatus, ValidityStatus
 from app.services.final_explanation_policy import (
     FinalExplanationDecision,
     FinalExplanationPolicy,
@@ -138,7 +136,8 @@ class ChatService:
             user_profile=profile,
             material_declarations=declarations,
             policy_search_query=previous_query or workflow_message,
-            user_goal=await self._store.get_user_goal(session_id, user_id),
+            active_goal=await self._store.get_user_goal(session_id, user_id),
+            requested_goal=await self._store.get_user_goal(session_id, user_id),
         )
         await self._store.set_material_declarations(session_id, user_id, state.materialDeclarations)
         await self._store.set_internal_profile(session_id, user_id, state.userProfile)
@@ -198,11 +197,10 @@ class ChatService:
         state: GovernmentAgentState,
         decision: FinalExplanationDecision | None = None,
     ) -> str:
-        local_reply = ChatService._local_fallback_reply(state)
+        local_reply = state.finalReply or PresentationAdapter.fallback_reply(state)
         if decision and decision.skip_reason is FinalExplanationSkipReason.MATERIAL_UPDATE:
             local_reply = "已记录您本轮更新的材料准备情况。\n\n" + local_reply
-        realtime_reply = ChatService._realtime_reply(state)
-        return local_reply + ("\n\n" + realtime_reply if realtime_reply else "")
+        return local_reply
 
     @staticmethod
     def _realtime_reply(state: GovernmentAgentState) -> str:
@@ -363,22 +361,20 @@ class ChatService:
         previous_query = await self._store.get_policy_query_context(request.sessionId, request.userId)
         query_context, search_query = PolicyQueryContextResolver.resolve(request.message, previous_query)
         previous_goal = await self._store.get_user_goal(request.sessionId, request.userId)
-        detected_goal = GoalResolver.resolve(request.message, previous_goal)
-        user_goal = (
-            previous_goal
-            if detected_goal in {UserGoal.PROFILE_UPDATE, UserGoal.FOLLOW_UP_REPLY} and previous_goal is not None
-            else detected_goal
-        )
-        if user_goal is UserGoal.OUT_OF_SCOPE:
-            user_goal = None
         await self._store.set_policy_query_context(request.sessionId, request.userId, query_context)
-        await self._store.set_user_goal(request.sessionId, request.userId, user_goal)
+        # 域外消息不需要画像抽取；具体目标解析与最终路由仍只由图中的
+        # GoalResolver/conditional edge 完成。
         if PolicyDomainIntentDetector.detect(request.message) is PolicyDomainIntent.OUT_OF_SCOPE:
-            workflow_started_at = perf_counter()
-            state = await self._workflow_agent.run(
-                request.sessionId, request.message, stored_profile, declarations
+            state = await self._execute_workflow(
+                session_id=request.sessionId,
+                message=request.message.strip(),
+                user_profile=stored_profile,
+                material_declarations=declarations,
+                policy_search_query=search_query,
+                metrics=metrics,
+                active_goal=previous_goal,
             )
-            metrics.workflow_ms = (perf_counter() - workflow_started_at) * 1000
+            await self._store.set_internal_profile(request.sessionId, request.userId, state.userProfile)
             return state
         manual_fields = await self._store.get_manual_profile_fields(request.sessionId, request.userId)
         request_values = {
@@ -443,7 +439,12 @@ class ChatService:
             material_declarations=declarations,
             policy_search_query=search_query,
             metrics=metrics,
-            user_goal=user_goal,
+            active_goal=previous_goal,
+        )
+        await self._store.set_user_goal(
+            request.sessionId,
+            request.userId,
+            None if state.userGoal is UserGoal.OUT_OF_SCOPE else state.activeGoal,
         )
         await self._store.set_material_declarations(request.sessionId, request.userId, state.materialDeclarations)
         await self._store.set_internal_profile(request.sessionId, request.userId, state.userProfile)
@@ -457,7 +458,8 @@ class ChatService:
         material_declarations: dict[str, bool],
         policy_search_query: str | None,
         metrics: RequestTimings | None = None,
-        user_goal: UserGoal | None = None,
+        active_goal: UserGoal | None = None,
+        requested_goal: UserGoal | None = None,
     ) -> GovernmentAgentState:
         workflow_started_at = perf_counter()
         workflow_timings: dict[str, float] = {}
@@ -468,54 +470,14 @@ class ChatService:
             material_declarations=material_declarations,
             policy_search_query=policy_search_query,
             timings=workflow_timings,
-            user_goal=user_goal,
+            user_goal=requested_goal,
+            active_goal=active_goal,
         )
-        state.suggestedActions = self._suggested_actions(state)
         if metrics is not None:
             metrics.workflow_ms = (perf_counter() - workflow_started_at) * 1000
             metrics.realtime_search_ms = workflow_timings.get("realtime_search_ms", 0)
             metrics.material_updated = state.materialDeclarations != material_declarations
-        if self._policy_repository is not None:
-            for candidate in state.candidatePolicies:
-                record = self._policy_repository.get_by_id(candidate.policyId)
-                if record is None:
-                    continue
-                historical = record.validityStatus in {ValidityStatus.HISTORICAL, ValidityStatus.EXPIRED}
-                closed = record.applicationStatus is ApplicationStatus.CLOSED
-                if historical and closed:
-                    notice = "该记录为历史申报通知，申报窗口已结束。请关注苏州市人社部门后续发布的最新年度申报安排。"
-                elif historical:
-                    notice = "该记录为历史政策依据，不能直接作为当前申请依据。请关注苏州市人社部门后续发布的最新年度申报安排。"
-                elif closed:
-                    notice = "该政策当前申报窗口已结束。请关注苏州市人社部门后续发布的最新年度申报安排。"
-                else:
-                    continue
-                state.policyReferenceNotices[candidate.policyId] = notice
         return state
-
-    @staticmethod
-    def _suggested_actions(state: GovernmentAgentState) -> list[SuggestedAction]:
-        if state.userGoal is UserGoal.JOB_SEARCH:
-            return [
-                SuggestedAction(label="看看就业见习", prompt="就业见习适合哪些毕业生？"),
-                SuggestedAction(label="看看毕业生就业支持", prompt="毕业生现在有什么就业支持？"),
-                SuggestedAction(label="了解可能符合的补贴", prompt="我可能符合哪些就业补贴？"),
-            ]
-        if state.userGoal is UserGoal.POLICY_DISCOVERY:
-            return [
-                SuggestedAction(label="了解就业见习", prompt="就业见习适合哪些毕业生？"),
-                SuggestedAction(label="判断我是否符合", prompt="我符合这项政策吗？"),
-            ]
-        if state.userGoal is UserGoal.POLICY_FACT:
-            return [
-                SuggestedAction(label="看看办理流程", prompt="这个政策怎么办理？"),
-                SuggestedAction(label="判断我是否符合", prompt="我符合这项政策吗？"),
-            ]
-        if state.userGoal is UserGoal.ELIGIBILITY_CHECK:
-            return [SuggestedAction(label="在右侧完善画像", prompt="我想补充个人情况")]
-        if state.userGoal is UserGoal.APPLICATION_GUIDE:
-            return [SuggestedAction(label="判断我是否符合", prompt="我符合这项政策吗？")]
-        return []
 
     @staticmethod
     def _log_request_timing(
@@ -556,7 +518,7 @@ class ChatService:
         if outcome is not None:
             reply = outcome.reply
             realtime_reply = self._realtime_reply(state)
-            if realtime_reply:
+            if realtime_reply and state.realtimeSearchStatus is not RealtimeSearchStatus.DISABLED:
                 reply += "\n\n" + realtime_reply
         elif decision.generate:
             timings.final_explanation_calls = 1
@@ -569,7 +531,7 @@ class ChatService:
                 if self._may_use_llm_reply(state, generated):
                     reply = generated
                     realtime_reply = self._realtime_reply(state)
-                    if realtime_reply:
+                    if realtime_reply and state.realtimeSearchStatus is not RealtimeSearchStatus.DISABLED:
                         reply += "\n\n" + realtime_reply
             except Exception:
                 pass
@@ -616,7 +578,7 @@ class ChatService:
         reply = "".join(chunks).strip() or self._fallback_reply(state, decision)
         if chunks:
             realtime_reply = self._realtime_reply(state)
-            if realtime_reply:
+            if realtime_reply and state.realtimeSearchStatus is not RealtimeSearchStatus.DISABLED:
                 reply += "\n\n" + realtime_reply
         await self._store.append_exchange(
             request.sessionId, request.userId, user_message, reply

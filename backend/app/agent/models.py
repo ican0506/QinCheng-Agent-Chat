@@ -130,6 +130,11 @@ class GovernmentAgentState(BaseModel):
     sessionId: str
     userMessage: str
     userProfile: UserProfile
+    # 仅在后端图编排中使用；不会映射到公开 ChatData。
+    messages: list[dict[str, str]] = Field(default_factory=list)
+    requestedGoal: UserGoal | None = None
+    activeGoal: UserGoal | None = None
+    activePolicy: str | None = None
     policySearchQuery: str | None = None
     domainIntent: PolicyDomainIntent = PolicyDomainIntent.UNCERTAIN
     queryMode: PolicyQueryMode = PolicyQueryMode.UNCERTAIN
@@ -149,7 +154,9 @@ class GovernmentAgentState(BaseModel):
     nextAction: str | None = None
     requiredFieldsForCurrentGoal: list[str] = Field(default_factory=list)
     suggestedActions: list[SuggestedAction] = Field(default_factory=list)
+    finalReply: str | None = None
     applicationGuide: bool = False
     errors: list[str] = Field(default_factory=list)
     realtimePolicyHits: list[RealtimePolicyHit] = Field(default_factory=list)
     realtimeSearchStatus: RealtimeSearchStatus = RealtimeSearchStatus.NOT_TRIGGERED
+    realtimeSearchMs: float = 0
