@@ -35,9 +35,15 @@ class EligibilityNode:
             state.requiredFieldsForCurrentGoal = missing_fields[:2]
             state.needFollowUp = True
             state.followUpQuestions = [
-                self._questions.get(field, f"请补充 {field} 信息。")
+                self._question_for(field, state)
                 for field in missing_fields[:2]
             ]
             state.nextAction = "补充这些信息后即可继续核验当前政策资格。"
         state.stage = AgentStage.POLICY_COMPARING
         return state
+
+    @classmethod
+    def _question_for(cls, field: str, state: GovernmentAgentState) -> str:
+        if field == "graduationDate" and state.userProfile.graduationYear is not None and state.userProfile.graduationMonth is not None:
+            return "已确认毕业年月，但仍需提供精确毕业日期，以便准确核验毕业年限。"
+        return cls._questions.get(field, f"请补充 {field} 信息。")

@@ -24,10 +24,17 @@ class OfficialRealtimePolicySearchTool:
         self.timeout_seconds = timeout_seconds
         self.max_results = max_results
 
-    async def search(self, profile: UserProfile, message: str, reason: str) -> tuple[RealtimeSearchStatus, list[RealtimePolicyHit]]:
+    async def search(
+        self,
+        profile: UserProfile,
+        message: str,
+        reason: str,
+        *,
+        search_query: str | None = None,
+    ) -> tuple[RealtimeSearchStatus, list[RealtimePolicyHit]]:
         if isinstance(self.provider, DisabledRealtimeSearchProvider):
             return RealtimeSearchStatus.DISABLED, []
-        query, keywords = build_query(message, profile, [r.name for r in self.repository.filter()])
+        query, keywords = build_query(search_query or message, profile, [r.name for r in self.repository.filter()])
         try:
             results = await asyncio.wait_for(self.provider.search(query, list(self.allowed_domains), self.max_results), timeout=self.timeout_seconds)
             hits = []

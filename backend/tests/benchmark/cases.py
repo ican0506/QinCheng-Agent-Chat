@@ -58,8 +58,8 @@ def benchmark_cases() -> tuple[BenchmarkCase, ...]:
             BenchmarkTurn("先不管补贴了，我只想找工作", UserGoal.JOB_SEARCH, True),
         )),
         BenchmarkCase("C27", "多轮：画像纠正", (
-            BenchmarkTurn("我在苏州，本科，今年毕业，目前待就业", UserGoal.POLICY_DISCOVERY, True),
-            BenchmarkTurn("之前说错了，其实我是硕士", UserGoal.POLICY_DISCOVERY, True),
+            BenchmarkTurn("我在苏州，本科，今年毕业，目前待就业", UserGoal.PROFILE_UPDATE, False),
+            BenchmarkTurn("之前说错了，其实我是硕士", UserGoal.PROFILE_UPDATE, False),
         )),
         BenchmarkCase("C28", "多轮：短追问", (
             BenchmarkTurn("创业社会保险补贴需要什么条件", UserGoal.POLICY_FACT, True),

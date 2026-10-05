@@ -16,6 +16,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from app.agent.models import GovernmentAgentState
+from app.agent.realtime_relevance import relevant_realtime_hits
 from app.main import create_app
 from app.models.chat import UserProfile
 from app.realtime_policy.models import RealtimeSearchStatus
@@ -81,7 +82,8 @@ def _score(turn: BenchmarkTurn, state: GovernmentAgentState, reply: str) -> tupl
     retrieval = 2 if searched is turn.expect_search else 0
     if not retrieval:
         issues.append("检索边界不符合预期")
-    urls = [hit.url for hit in state.realtimePolicyHits] + [item.sourceUrl for item in state.knowledgeEvidences]
+    displayed_hits = relevant_realtime_hits(state)
+    urls = [hit.url for hit in displayed_hits] + [item.sourceUrl for item in state.knowledgeEvidences]
     official = 2 if (not urls or all(url.startswith("https://") and ("suzhou.gov.cn" in url or "hrss.suzhou.gov.cn" in url) for url in urls)) else 0
     if not official:
         issues.append("出现非官方或非 HTTPS 证据")
@@ -96,7 +98,23 @@ def _score(turn: BenchmarkTurn, state: GovernmentAgentState, reply: str) -> tupl
     clarification = 2 if len(state.followUpQuestions) <= 2 else 0
     if not clarification:
         issues.append("追问超过两个字段")
-    actionability = 2 if state.userGoal is UserGoal.CONVERSATIONAL or state.suggestedActions or any(word in reply for word in ("办理", "申请", "关注", "下一步")) else 1
+    if state.userGoal is UserGoal.JOB_SEARCH:
+        employment_words = ("就业", "招聘", "岗位", "见习", "求职", "就业服务")
+        action_words = ("下一步", "查看", "查询", "参加", "对接", "联系")
+        startup_words = ("创业补贴", "创业社会保险补贴", "一次性创业补贴")
+        historical_only = ("历史" in reply or "已结束" in reply) and not any(word in reply for word in employment_words)
+        relevant_evidence = bool(displayed_hits) and all(
+            any(word in f"{hit.title} {hit.snippet}" for word in employment_words)
+            for hit in displayed_hits
+        )
+        if not relevant_evidence or historical_only:
+            retrieval = 0
+            issues.append("JOB_SEARCH 未展示相关就业证据")
+        actionability = 2 if any(word in reply for word in employment_words) and any(word in reply for word in action_words) and not any(word in reply for word in startup_words) else 0
+        if not actionability:
+            issues.append("JOB_SEARCH 缺少就业行动方向或错误推荐创业政策")
+    else:
+        actionability = 2 if state.userGoal is UserGoal.CONVERSATIONAL or state.suggestedActions or any(word in reply for word in ("办理", "申请", "关注", "下一步")) else 1
     internal = ("Dify", "RAG", "Tavily", "chunk", "embedding", "UserGoal", "QueryMode")
     quality = 2 if reply and not any(word in reply for word in internal) else 0
     if not quality:

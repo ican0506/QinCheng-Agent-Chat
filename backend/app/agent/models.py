@@ -141,6 +141,7 @@ class GovernmentAgentState(BaseModel):
     requestedGoal: UserGoal | None = None
     activeGoal: UserGoal | None = None
     activePolicy: str | None = None
+    targetPolicyId: str | None = None
     conversationIntent: ConversationIntent | None = None
     policySearchQuery: str | None = None
     domainIntent: PolicyDomainIntent = PolicyDomainIntent.UNCERTAIN

@@ -29,10 +29,20 @@ class GoalAwarePolicyRanker:
                 )
             return 20 * int("就业" in topics) + 10 * int("创业补贴" in topics)
 
-        return [
+        ranked = [
             candidate
             for _, candidate in sorted(
                 enumerate(candidates),
                 key=lambda item: (-score(item[1]), item[0]),
             )
         ]
+        # 找工作时创业政策不是默认推荐。保留“全为空”的兜底，避免未来政策库
+        # 尚未覆盖就业服务时直接把正常结果清空。
+        if goal is UserGoal.JOB_SEARCH:
+            non_startup = [candidate for candidate in ranked if not self._is_startup(candidate)]
+            return non_startup or ranked
+        return ranked
+
+    def _is_startup(self, candidate: PolicyCandidate) -> bool:
+        record = self._repository.get_by_id(candidate.policyId) if self._repository else None
+        return bool(record and "创业补贴" in set(record.topics))

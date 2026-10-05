@@ -1,6 +1,7 @@
 """将既有业务节点适配为 LangGraph 节点。"""
 from __future__ import annotations
 
+import inspect
 from collections.abc import Awaitable, Callable
 
 from app.agent.models import AgentStage, GovernmentAgentState, SuggestedAction
@@ -12,6 +13,8 @@ from app.agent.nodes.policy_search import PolicySearchNode
 from app.agent.nodes.profile import ProfileNode
 from app.agent.nodes.realtime_policy_search import RealtimePolicySearchNode
 from app.agent.presentation import PresentationAdapter
+from app.agent.search_query import AgentSearchQueryBuilder
+from app.agent.target_policy import TargetPolicyResolver
 from app.policy.models import ApplicationStatus, ValidityStatus
 from app.policy.repository import PolicyRepository
 from app.services.policy_query_context import ConversationIntentDetector, GoalResolver, RouteDecider, UserGoal
@@ -44,7 +47,15 @@ class GraphNodeAdapter:
         self._repository = repository
 
     async def resolve_goal(self, state: GovernmentAgentState) -> GovernmentAgentState:
+        target = TargetPolicyResolver(self._repository).resolve(state.userMessage)
         detected = state.requestedGoal or GoalResolver.resolve(state.userMessage, state.activeGoal)
+        if target is None and state.activePolicy and detected in {
+            UserGoal.FOLLOW_UP_REPLY, UserGoal.ELIGIBILITY_CHECK, UserGoal.APPLICATION_GUIDE,
+        }:
+            target = state.activePolicy
+        if target is not None:
+            state.targetPolicyId = target
+            state.activePolicy = target
         state.conversationIntent = ConversationIntentDetector.detect(state.userMessage)
         # 会话元表达只消费本轮消息，不能清空正在进行的真实任务，更不能把
         # 上一轮的 active goal 当成本轮搜索目标。
@@ -72,7 +83,12 @@ class GraphNodeAdapter:
 
     async def official_search(self, state: GovernmentAgentState) -> GovernmentAgentState:
         if self._realtime is not None:
-            return await self._realtime.execute(state, force=True)
+            query = AgentSearchQueryBuilder(self._repository).build(state)
+            # 保持注入式测试节点和已有自定义节点兼容：新节点可接收专用查询词，
+            # 旧节点继续只接收 force。
+            if "query" not in inspect.signature(self._realtime.execute).parameters:
+                return await self._realtime.execute(state, force=True)
+            return await self._realtime.execute(state, force=True, query=query)
         return state
 
     async def policy_search(self, state: GovernmentAgentState) -> GovernmentAgentState:
@@ -85,12 +101,16 @@ class GraphNodeAdapter:
         return state
 
     async def eligibility(self, state: GovernmentAgentState) -> GovernmentAgentState:
+        if state.targetPolicyId:
+            state.candidatePolicies = [p for p in state.candidatePolicies if p.policyId == state.targetPolicyId]
         return await self._eligibility.execute(state)
 
     async def policy_compare(self, state: GovernmentAgentState) -> GovernmentAgentState:
         return await self._policy_compare.execute(state)
 
     async def material(self, state: GovernmentAgentState) -> GovernmentAgentState:
+        if state.targetPolicyId:
+            state.candidatePolicies = [p for p in state.candidatePolicies if p.policyId == state.targetPolicyId]
         if self._material is not None:
             return await self._material.execute(state)
         return state

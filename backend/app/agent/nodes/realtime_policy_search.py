@@ -13,7 +13,7 @@ class RealtimePolicySearchNode:
         self.tool = tool
         self.enabled = enabled
 
-    async def execute(self, state: GovernmentAgentState, *, force: bool = False) -> GovernmentAgentState:
+    async def execute(self, state: GovernmentAgentState, *, force: bool = False, query: str | None = None) -> GovernmentAgentState:
         started = perf_counter()
         intent = FreshnessIntentDetector.detect(state.userMessage)
         state.realtimePolicyHits = []
@@ -23,7 +23,12 @@ class RealtimePolicySearchNode:
             state.realtimeSearchStatus = RealtimeSearchStatus.DISABLED
             if self.enabled:
                 try:
-                    state.realtimeSearchStatus, state.realtimePolicyHits = await self.tool.search(state.userProfile, state.userMessage, intent.reason or '官方政策信息查询')
+                    state.realtimeSearchStatus, state.realtimePolicyHits = await self.tool.search(
+                        state.userProfile,
+                        state.userMessage,
+                        intent.reason or '官方政策信息查询',
+                        search_query=query,
+                    )
                 except Exception:
                     state.realtimeSearchStatus = RealtimeSearchStatus.ERROR
         state.realtimeSearchMs = (perf_counter() - started) * 1000

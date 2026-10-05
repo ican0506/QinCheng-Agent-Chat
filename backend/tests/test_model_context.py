@@ -74,11 +74,11 @@ def test_history_is_trimmed_and_sessions_do_not_cross_context() -> None:
 def test_realtime_evidence_is_standardized_without_raw_metadata() -> None:
     item = state(UserGoal.POLICY_FACT)
     item.realtimePolicyHits = [RealtimePolicyHit(
-        hitId="hit", title="官方通知", url="https://hrss.suzhou.gov.cn/notice", snippet="相关官方正文", domain="hrss.suzhou.gov.cn", freshnessReason="当前政策查询", retrievedAt="2026-10-05T00:00:00Z",
+        hitId="hit", title="创业社会保险补贴官方通知", url="https://hrss.suzhou.gov.cn/notice", snippet="相关官方正文", domain="hrss.suzhou.gov.cn", freshnessReason="当前政策查询", retrievedAt="2026-10-05T00:00:00Z",
     )]
     context = ModelContextBuilder().build(item, [])
 
     evidence = context.officialEvidence[0]
-    assert evidence["来源标题"] == "官方通知"
+    assert evidence["来源标题"] == "创业社会保险补贴官方通知"
     assert evidence["官方来源"].startswith("https://")
     assert "hitId" not in context.to_prompt_text()
