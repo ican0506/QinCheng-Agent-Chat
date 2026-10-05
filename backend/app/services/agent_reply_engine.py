@@ -5,8 +5,6 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.agent.models import GovernmentAgentState
 from app.agent.reply_tools import ReplyToolContext, ReplyToolRegistry
@@ -14,17 +12,11 @@ from app.models.chat import ChatRequest
 from app.realtime_policy.models import RealtimeSearchStatus
 from app.services.llm.base import AgentMessage, LLMProvider
 from app.services.policy_query_context import PolicyDomainIntent, PolicyQueryMode
+from app.services.model_context import ModelContextBuilder, QINGCHENG_SYSTEM_PROMPT, current_date_directive
 
 logger = logging.getLogger(__name__)
 
-AGENT_REPLY_SYSTEM_PROMPT = """你是面向应届毕业生的就业创业政策对话 Agent。
-你拥有可自主调用的只读工具：search_policies（检索已核验政策）、get_policy_detail（政策详情）、
-check_eligibility（确定性资格核验）、check_materials（材料要求与声明状态）、search_realtime_policy（官方域名实时检索）。
-当结构化 Agent State 不足以回答时，自主决定调用工具补充事实；能直接回答时不必调用工具。
-工具结果是政策、金额、日期、资格结论的唯一事实来源；不得编造、推断或修饰任何政策事实。
-资格状态只能来自 check_eligibility 或结构化上下文，不得自行得出 PASS/FAIL。
-实时检索结果只是官方公开证据，不能转化为资格结论；引用实时信息必须附官方 URL。
-围绕用户本轮的真实诉求组织回复：直接回应问题本身，先给结论再给依据，表达自然简洁，可使用 Markdown。"""
+AGENT_REPLY_SYSTEM_PROMPT = QINGCHENG_SYSTEM_PROMPT
 
 # 无候选政策时的推荐话术守卫：只拦截"具体推荐句式"与"编造金额标准"，
 # 不再按"补贴"等泛词整句拒绝（自我介绍提到"帮你查补贴"属于正常表达）。
@@ -37,20 +29,6 @@ _INVENTED_AMOUNT_PATTERN = re.compile(r"(每月|一次性|最高|标准为|不�
 _POLICY_NAME_PATTERN = re.compile(r"《(.+?)》")
 
 _WEEKDAY_NAMES = ("一", "二", "三", "四", "五", "六", "日")
-
-
-def current_date_directive() -> str:
-    """服务器当前日期（Asia/Shanghai）。LLM 不知道今天几号，必须显式注入，否则会编造日期。"""
-    try:
-        now = datetime.now(ZoneInfo("Asia/Shanghai"))
-    except ZoneInfoNotFoundError:
-        # 极简测试镜像可能没有系统 tzdata；日期提示不能因此中断 Chat / SSE 主链路。
-        now = datetime.now()
-    return (
-        f"当前日期：{now.year}年{now.month}月{now.day}日 星期{_WEEKDAY_NAMES[now.isoweekday() - 1]}（Asia/Shanghai）。"
-        "用户提及「今天/现在/最近/最新」等时间时一律以该日期为准；"
-        "除此之外的时间信息（发布日期、截止日期等）只能来自工具结果或结构化上下文，不得自行编造或推测日期。"
-    )
 
 
 @dataclass
@@ -138,11 +116,13 @@ class AgentReplyEngine:
         *,
         timeout_seconds: float = 15.0,
         max_tool_rounds: int = 3,
+        model_context_builder: ModelContextBuilder | None = None,
     ) -> None:
         self._provider = provider
         self._registry = registry
         self._timeout_seconds = timeout_seconds
         self._max_tool_rounds = max_tool_rounds
+        self._model_context_builder = model_context_builder or ModelContextBuilder()
 
     async def generate(
         self,
@@ -164,28 +144,15 @@ class AgentReplyEngine:
         if not self._provider.supports_tools:
             raise AgentReplyError("Agent 回复引擎要求 Provider 支持 function calling")
         context = self._context(request, state)
-        strategy = strategy_directive(state)
-        if request.webSearch:
-            strategy += (
-                "\n用户已开启联网搜索：需要最新政策动态、申报窗口、时效性信息或本地库没有的事实时，"
-                "调用 search_web 检索全网公开信息；引用网络结果必须附来源标题与 URL，"
-                "不得由摘要编造事实、金额或日期；本地政策库与资格工具仍是资格结论的唯一来源。"
-                "构造检索词必须包含当前年月（如「苏州 毕业生 创业补贴 2026年 最新」），否则搜索会命中往年旧文；"
-                "用户询问「最近/最新/今年」类信息时必须传 time_range 参数（week/month/year）；"
-                "对结果中发布日期较旧的内容要注明其发布时间，不得当作最新政策呈现。"
-            )
+        model_context = self._model_context_builder.build(state, history)
         messages: list[AgentMessage] = [
             {
                 "role": "system",
-                "content": (
-                    f"{AGENT_REPLY_SYSTEM_PROMPT}\n\n"
-                    f"{current_date_directive()}\n\n"
-                    f"本轮回复策略：\n{strategy}\n\n"
-                    "结构化 Agent State（唯一事实来源）：\n"
-                    f"{json.dumps(state.model_dump(mode='json'), ensure_ascii=False, separators=(',', ':'))}"
+                "content": self._model_context_builder.agent_system_message(
+                    model_context, web_search=request.webSearch
                 ),
             },
-            *history,
+            *model_context.conversationHistory,
             {"role": "user", "content": request.message.strip()},
         ]
         rounds = 0
