@@ -1,6 +1,6 @@
 # 青程 Agent
 
-面向高校毕业生和青年群体的就业创业政务办事 Agent。它不止回答政策问题，还会围绕用户的实际办事目标，持续补充画像、检索相关政策、进行资格辅助判断、检查材料准备情况，并生成可执行的办理路径；对于具有时效性的政策问题，还可以按需检索最新官方公开信息。
+面向高校毕业生和青年群体的就业创业政务办事 Agent。系统先理解用户本轮目标，再按需检索政策、解释办事流程或进行资格辅助判断；不会为了补全画像而把每次咨询变成固定问卷。对于具有时效性的政策问题，还可以按需检索最新官方公开信息。
 
 > 本项目提供政策检索、资格初步判断、材料检查和办理路径规划，不代替政府部门审批，也不会自动向政府部门提交申请。政策效力、申报要求和最终审批结果以主管部门最新规定及实际审核为准。
 
@@ -26,12 +26,16 @@
 
 系统也支持明确的否定式纠正，例如“不是未就业”“不是待就业”“已经不是待业状态”“不是灵活就业参保”“没有按灵活就业参保”。明确的 `false` 可以覆盖历史 `true`；“不是未就业”不会被武断推断为“已就业”，在用户没有说明新的就业状态时，系统会清除无法确认的旧状态，而不是编造新状态。
 
-### 政策事实查询与个性化资格查询
+### 目标驱动对话与个性化资格查询
 
-系统会先进行轻量、确定性的 Query Mode / Domain Intent 识别，区分“问政策本身”和“问我是否符合”。
+系统使用确定性的 Goal Resolver 与 Route Decision 区分用户当前任务，并通过 LangGraph 条件路由决定是否调用检索、资格、材料或计划能力。
 
-- **政策事实查询（FACT_QUERY）**：例如“创业社会保险补贴需要什么条件？”、“苏州创业社会保险补贴现在还能申请吗？”。这类问题无需先补齐城市、学历、毕业年份和就业状态，即可进入本地政策检索；涉及当前性或历史官方通知时，可按需触发 Tavily 实时检索。
-- **个性化资格查询（PERSONALIZED_QUERY）**：例如“我符合创业社会保险补贴吗？”、“根据我的情况我能申请什么？”。这类问题继续执行画像补充与 `RuleEligibilityTool`；信息不足时保持 `UNKNOWN` 并生成 Follow-up。
+- **政策事实咨询**：例如“创业社会保险补贴需要什么条件？”、“一次性创业补贴有多少钱？”。直接回答政策事实，不要求先补齐个人画像，也不自动输出资格、材料或办理计划。
+- **政策发现与求职咨询**：例如“毕业生有什么就业支持？”、“我快毕业了，不知道去哪找工作”。优先提供就业见习、官方招聘、就业服务和可行动的下一步；用户明确不创业时，创业政策不会作为主要推荐。
+- **个性化资格判断**：例如“我符合创业社会保险补贴吗？”。仅此类目标进入 `RuleEligibilityTool`；信息不足时只追问当前目标真正需要的 1～2 项信息。
+- **办理指引**：例如“创业社会保险补贴怎么办理？”、“需要什么材料？”。直接提供流程、材料参考和官方来源，不把办理咨询误转为资格问卷。
+
+短追问会结合会话中的活动目标处理。例如，先问“创业社会保险补贴需要什么条件”，再问“那我可以吗”会进入该政策的资格判断；继续问“需要什么材料”则仍围绕同一政策提供办理参考。
 
 允许直接查询政策事实，不等于跳过规则引擎判断用户资格。事实查询在画像不足时只说明结构化政策事实与官方证据，不输出“您符合”或“您不符合”的个性化结论。
 
@@ -55,27 +59,25 @@
 
 ```mermaid
 flowchart TD
-    U[用户] --> C[Chat API / SSE]
-    C --> Q[Query Mode Detection / Query Routing]
-    Q -->|OUT_OF_SCOPE| X[Final Explanation / Fallback]
-    Q --> P[ProfileNode]
-    P --> R[Local RAG Policy Search]
-    R --> RT[Realtime Policy Search]
-    RT --> E[Rule Eligibility]
-    RT --> RE[Realtime Evidence]
-    E --> PC[Policy Compare]
-    PC --> M[Material Check]
-    M --> PL[Deterministic Plan]
-    RE --> X[Final Explanation / Fallback]
-    PL --> X
-    X --> D[ChatData]
+    U[用户消息] --> C[Chat API / SSE]
+    C --> G[Goal Resolver]
+    G --> R[Route Decision]
+    R -->|事实/发现/求职| W[官方信息检索]
+    R -->|资格判断| S[结构化政策检索]
+    R -->|办理指引| A[材料与流程参考]
+    W --> P[Presentation]
+    S --> E[Rule Eligibility]
+    E --> M[按状态进入材料/计划]
+    A --> P
+    M --> P
+    P --> D[ChatData]
     D --> UI[Chat + Workspace]
 ```
 
 主要技术栈：
 
 - Frontend：Vue 3、TypeScript、Vite；
-- Backend：FastAPI、Pydantic、WorkflowAgent；
+- Backend：FastAPI、Pydantic、LangGraph 条件编排；
 - Policy：PolicyRepository、PolicyRecord、PolicyCondition；
 - Retrieval：RagPolicySearchTool、中文字符 n-gram TF-IDF、LocalPolicySearchTool fallback；
 - Realtime Search：Tavily Search API、httpx async client、官方域名 allowlist；
@@ -95,22 +97,21 @@ flowchart TD
 
 ```text
 用户请求
-  → Query Mode / Domain Intent
-  → ProfileNode
-  → PolicySearchNode（RagPolicySearchTool）
-  → RealtimePolicySearchNode（按需）
-  → EligibilityNode（RuleEligibilityTool）
-  → PolicyCompareNode
-  → MaterialCheckNode
-  → PlanNode
-  → Final Explanation / Deterministic Fallback
+  → GoalResolver
+  → RouteDecider
+  → LangGraph Conditional Routing
+  ├─ 事实 / 政策发现 / 求职：官方信息检索 → 展示
+  ├─ 资格判断：结构化政策检索 → RuleEligibilityTool → 按状态进入材料/计划
+  └─ 办理指引：结构化政策检索 → 材料与流程参考
+  → Presentation / Deterministic Fallback
 ```
 
-- `FACT_QUERY` 可以穿过 `ProfileNode` 的完整画像门槛，先查询本地政策事实，并在需要时查询实时官方信息；画像不足时不进行个性化资格结论；
-- `PERSONALIZED_QUERY` 仍在必要画像缺失时生成有限的 Follow-up，并提前停止后续个性化判断；
-- `OUT_OF_SCOPE` 直接分流，不进入政策检索、画像追问或实时搜索；
-- `RagPolicySearchTool` 负责本地政策召回和原文 evidence，异常时回退 `LocalPolicySearchTool`；
-- `RealtimePolicySearchNode` 只在明确当前性或历史官方查询中运行，并非每次请求都联网；
+- 政策事实、政策发现与求职咨询遵循“先回答、必要时再追问”，不会默认运行资格、材料或计划；
+- 个性化资格判断仍在必要画像缺失时生成有限追问，并提前停止后续个性化判断；
+- 闲聊、画像更新等非政策目标不联网、不检索、不进入资格链；
+- 无关主题直接分流，不进入政策检索、画像追问或实时搜索；
+- 官方联网检索优先服务政策事实、政策发现与求职目标；Dify/本地 RAG 用于证据补充与故障回退，异常时继续回退 `LocalPolicySearchTool`；
+- `RealtimePolicySearchNode` 只在当前目标需要政策信息时运行，并非每次请求都联网；搜索结果会经过官方来源、主题相关性和去重过滤；
 - `RuleEligibilityTool` 是资格判断的唯一确定性来源；
 - 后续节点始终使用本轮最新候选政策重新计算，不累积上一轮失效的资格、追问或计划。
 
@@ -123,9 +124,9 @@ POST /api/agent/chat/stream
 
 SSE 事件保持 `delta / done / error`。确定性回复可以没有 `delta`，但成功路径最后一个事件始终为 `done`，完整结果位于 `done.data`。
 
-## 政策数据与本地 RAG
+## 政策资料、知识检索与证据
 
-当前知识库主要聚焦苏州市高校毕业生和青年就业创业政策，政策来源主要为：
+结构化政策资料主要聚焦苏州市高校毕业生和青年就业创业场景，来源主要为：
 
 - 苏州市人民政府；
 - 苏州市人力资源和社会保障局。
@@ -148,7 +149,9 @@ Markdown 标题优先切分
   → PolicyCandidate 去重
 ```
 
-每个命中片段保留政策 ID、政策名称、官方 `sourceUrl`、时效状态、最后核验日期和 chunk 信息。这是零新增模型依赖的本地文本相关性检索，不是 embedding 模型或外部向量数据库。
+每个命中片段保留政策 ID、政策名称、官方 `sourceUrl`、时效状态、最后核验日期和片段信息。这是零新增模型依赖的本地文本相关性检索，不是 embedding 模型或外部向量数据库。
+
+项目还支持可选的 Dify Knowledge 检索。Dify 返回的是只读事实证据：已映射到 `PolicyRepository` 的文档可以辅助结构化政策召回；未映射的知识资料仅可用于事实说明，不能进入资格判断、材料检查或办理计划。Dify 不可用时，检索链路继续回退本地 RAG 与 `LocalPolicySearchTool`。
 
 `policy_relations.json` 当前保持空关系集合：现有政策没有足够官方依据支持 `MUTEX` 或 `PREREQUISITE`，项目不会为了展示效果制造政策关系。
 
@@ -162,7 +165,7 @@ Markdown 标题优先切分
 
 ## 实时官方政策检索
 
-项目已接入 `TavilyRealtimeSearchProvider`，并完成真实联网验证。实时检索主要服务于：
+项目已接入 `TavilyRealtimeSearchProvider`。实时检索主要服务于：
 
 - 最新政策发现；
 - “现在还能不能申请”等当前状态查询；
@@ -176,11 +179,11 @@ suzhou.gov.cn
 hrss.suzhou.gov.cn
 ```
 
-Provider 请求时使用 domain restriction；返回结果还会再次经过本地 HTTPS、hostname 和 allowlist 校验。真实验证已成功返回 `suzhou.gov.cn`、`www.suzhou.gov.cn`、`hrss.suzhou.gov.cn` 官方页面。项目不直接抓取任意用户 URL，不执行网页脚本，也不把第三方转载作为正式实时证据。
+Provider 请求时使用 domain restriction；返回结果还会再次经过本地 HTTPS、hostname 和 allowlist 校验。项目不直接抓取任意用户 URL，不执行网页脚本，也不把第三方转载作为正式实时证据。
 
 ### 触发规则
 
-以下表达会触发实时官方检索：
+当本轮目标需要政策或就业信息时，系统优先进行官方信息检索；例如政策事实、政策发现、求职咨询、当前性查询和历史通知查询。以下表达也会形成明确的实时检索信号：
 
 - 最新、最近发布、新政策；
 - 现在还能申请吗、还能申领吗；
@@ -193,7 +196,7 @@ Provider 请求时使用 domain restriction；返回结果还会再次经过本�
 - “我2026年毕业”；
 - “毕业日期是2026年6月20日”。
 
-这可以避免无意义的实时调用和额外延迟。
+闲聊、画像更新、致谢和无关主题不会触发实时检索。这保证“Web-first”表示政策信息优先来自官方公开来源，而不是每条消息都联网。
 
 ### 历史通知排序
 
@@ -236,14 +239,14 @@ eq / gte / lte / in / not_in / exists / within_years
 | `UNKNOWN` | 信息不足，暂无法判断 |
 | `MANUAL_REVIEW` | 需要人工核验 |
 
-LLM 可以解释结果，但不能生成或覆盖上述资格状态。缺少字段时，Follow-up 只从当前候选政策的真实 `missingFields` 生成，并对相同问题去重。
+LLM 可以解释结果，但不能生成或覆盖上述资格状态。缺少字段时，追问只从当前候选政策的真实 `missingFields` 生成，并对相同问题去重。
 
 系统区分政策依据有效性与申报窗口状态：
 
 - 政策依据记录 `ACTIVE / EXPIRED / HISTORICAL / UNKNOWN`；
 - 申报窗口独立记录 `OPEN / CLOSED / NOT_STARTED / UNKNOWN`；
 - `CLOSED` 不等于资格 `FAIL`，历史或关闭记录也不会被描述成当前仍可申请；
-- CURRENT 查询优先当前有效政策，明确历史查询允许历史通知优先召回。
+- 普通当前咨询优先当前有效政策；明确历史查询允许历史通知优先召回。
 
 ## 材料检查与办理计划
 
@@ -284,7 +287,7 @@ NOTICE
 - 政策查询上下文；
 - 对话历史。
 
-新建任务不会继承其他任务的学历、毕业年份、意图、社保信息或材料状态。`policy_query_context` 用于保留用户正在咨询的政策目标：当下一轮只说“其实我是硕士”时，系统可以更新画像而不丢失原政策主题。
+新建任务不会继承其他任务的学历、毕业年份、意图、社保信息或材料状态。Session 会持久保存活动目标和活动政策：当下一轮只说“其实我是硕士”时，系统可以更新画像而不丢失原政策主题；当用户明确转为“我只想找工作”时，旧资格任务会停止。
 
 前端按 Session 保存各自最新的 `ChatData`，`activeSessionId` 与会话列表保存在 localStorage，刷新页面后恢复当前任务。`delta` 只更新聊天流式文本，`done` 一次性写入完整 `done.data`，`error` 保留上一份有效 Workspace 数据。
 
@@ -294,13 +297,11 @@ NOTICE
 
 Final Explanation LLM 并非每次请求都调用。以下确定性场景可以直接跳过：
 
-- 画像不足的 `FACT_QUERY`；
-- `OUT_OF_SCOPE`；
-- `FOLLOW_UP`；
-- `HISTORICAL_ONLY`；
-- `NO_POLICY`；
-- `MATERIAL_UPDATE`；
-- `REALTIME_STATUS_ONLY`。
+- 政策事实咨询的已核验直接回复；
+- 无关主题分流；
+- 当前目标所需信息的补充回复；
+- 仅命中历史通知、未找到相关政策或仅更新材料状态；
+- 仅说明实时查询状态的回复。
 
 复杂多政策比较或确有必要的资格解释仍可使用 Final Explanation LLM。当前默认超时配置：
 
@@ -364,7 +365,18 @@ REALTIME_POLICY_SEARCH_TIMEOUT_SECONDS=8
 REALTIME_POLICY_SEARCH_MAX_RESULTS=5
 ```
 
-真实 Key 只能保存在本地 `backend/.env`。仓库中的 `backend/.env.example` 必须保持 `REALTIME_POLICY_SEARCH_API_KEY=` 为空。实时检索默认关闭；未配置、无结果、超时或 Provider 异常时，本地政策检索、资格、材料和计划链路仍继续运行。
+可选启用 Dify Knowledge：
+
+```env
+DIFY_KNOWLEDGE_ENABLED=false
+DIFY_BASE_URL=https://api.dify.ai/v1
+DIFY_DATASET_ID=
+DIFY_DATASET_API_KEY=
+DIFY_KNOWLEDGE_TIMEOUT_SECONDS=5
+DIFY_KNOWLEDGE_TOP_K=5
+```
+
+真实 Key 只能保存在本地 `backend/.env`。仓库中的 `.env.example` 必须保持所有 Key 为空。实时检索或 Dify 未配置、无结果、超时或 Provider 异常时，结构化政策、资格、材料和计划链路仍可按对应路由继续执行。
 
 ## 测试与验证
 
@@ -388,22 +400,22 @@ npm run build
 
 当前验证基线：
 
-- Backend：`259 passed`；
+- Backend：`363 passed`；
 - Workspace tests：通过；
 - TypeScript typecheck：通过；
 - Frontend build：通过。
 
-Realtime / Provider 测试已覆盖 Tavily 正常响应、timeout、401/403、429、5xx、非法响应、官方域名过滤、Provider 装配和调用次数；同时覆盖普通画像与 OUT_OF_SCOPE 不调用实时 Provider。
+Realtime / Provider 测试覆盖 Tavily 正常响应、timeout、401/403、429、5xx、非法响应、官方域名过滤、Provider 装配和调用次数；同时覆盖闲聊、画像更新与无关主题不调用实时 Provider。
 
-## 当前 RC 状态
+## 当前验证说明
 
-当前比赛 RC 的验证基线为：
+最近一次本地验证为：
 
-- Backend：`259 passed`；
+- Backend：`363 passed`；
 - Frontend workspace tests、typecheck、build：通过；
-- Competition RC：P0 为 0，P1 为 0。
+- 后端回归覆盖目标路由、实时检索边界、资格规则、材料状态、会话隔离与 SSE 协议。
 
-真实浏览器已回归政策事实查询、当前政策 + Tavily、个性化资格 Follow-up、完整创业画像、历史通知、否定式画像纠正、Session 隔离、Material READY、OUT_OF_SCOPE 与 Prompt Injection。当前比赛 RC 未发现阻断级 P0/P1；仍可能存在不阻断主链路的 P2，项目不宣称“零 Bug”。
+请在发布或比赛演示前按下方典型场景完成真实浏览器回归。项目不宣称“零 Bug”，最终政策事实、申报窗口和审核结论始终以主管部门公开口径为准。
 
 ## 典型演示场景
 
@@ -413,7 +425,7 @@ Realtime / Provider 测试已覆盖 Tavily 正常响应、timeout、401/403、42
 
 > 创业社会保险补贴需要什么条件？
 
-展示 `FACT_QUERY`、无需先补完整画像，以及本地已核验政策事实查询。
+展示政策事实咨询：无需先补完整画像，可直接查看已核验政策条件与官方来源。
 
 ### 2. 当前政策实时查询
 
@@ -421,15 +433,15 @@ Realtime / Provider 测试已覆盖 Tavily 正常响应、timeout、401/403、42
 
 > 苏州创业社会保险补贴现在还能申请吗？
 
-展示 `FACT_QUERY`、Tavily 实时官方搜索、当前状态查询，以及实时 evidence 与资格判断隔离。
+展示当前政策咨询、Tavily 实时官方搜索、当前状态查询，以及实时证据与资格判断隔离。
 
-### 3. 个性化资格 Follow-up
+### 3. 个性化资格追问
 
 输入：
 
 > 我符合创业社会保险补贴吗？
 
-展示 `PERSONALIZED_QUERY`、Profile Follow-up 与 `RuleEligibilityTool`。
+展示个性化资格判断、有限追问与 `RuleEligibilityTool`。
 
 ### 4. 完整创业画像
 
@@ -453,17 +465,17 @@ Realtime / Provider 测试已覆盖 Tavily 正常响应、timeout、401/403、42
 
 > 我想看2026届求职创业补贴之前的申报通知
 
-展示 Historical intent、Tavily 历史官方检索、届别/主题重排和历史材料只读。
+展示历史通知查询、Tavily 官方检索、届别/主题重排和历史材料只读。
 
-### 7. 相对年份与 Follow-up
+### 7. 相对年份与增量追问
 
 输入：
 
 > 我去年本科毕业，目前待业，我在苏州
 
-展示相对年份理解、画像归一、政策匹配，以及只针对缺失字段生成的 Follow-up。
+展示相对年份理解、画像归一、政策匹配，以及只针对缺失字段生成的追问。
 
-### 8. OUT_OF_SCOPE 分流
+### 8. 无关主题分流
 
 输入：
 
@@ -478,7 +490,7 @@ Realtime / Provider 测试已覆盖 Tavily 正常响应、timeout、401/403、42
 - 实时网页证据与结构化资格判断隔离；
 - LLM 不直接决定 `PASS / FAIL / UNKNOWN / MANUAL_REVIEW`；
 - 新政策未结构化前不能进入 Eligibility、Material 或 Plan；
-- Provider 失败自动回退本地知识库，不中断主 Workflow；
+- Provider 失败自动回退可用的本地检索路径，不中断主对话流程；
 - Session 画像、材料和查询上下文相互隔离；
 - Tavily 与 LLM Key 只读取本地环境变量，不进入 Git；
 - 日志记录状态与阶段耗时，不记录 API Key。
@@ -491,7 +503,6 @@ Realtime / Provider 测试已覆盖 Tavily 正常响应、timeout、401/403、42
 - 实时搜索依赖 Tavily 服务和官方网页可用性；
 - 后端 Session 当前为进程内存储，尚未接入业务数据库；
 - PDF、OCR、文件上传和复杂附件审核尚未作为正式核心能力；
-- 当前比赛 RC 仍可能存在不阻断主链路的 P2；
 - 系统不自动提交政府申请，也不代替主管部门正式审批；
 - 最终政策效力、申报窗口和审批结果以对应主管部门为准。
 
