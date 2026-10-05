@@ -10,3 +10,7 @@ frontend/dist/
 frontend/.vite/
 frontend/.workspace-test/
 *.tsbuildinfo
+
+# Agent benchmark runtime results
+backend/tests/benchmark/latest-results.json
+backend/tests/benchmark/results/
